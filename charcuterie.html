@@ -125,6 +125,10 @@
 
   .seasonings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   @media (max-width: 460px) { .seasonings { grid-template-columns: 1fr; } }
+  .seas-group + .seas-group { margin-top: 14px; }
+  .seas-head { display: flex; align-items: baseline; gap: 7px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--accent); margin-bottom: 8px; }
+  .seas-head .n { font-size: 15px; }
+  .seas-head span { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--ink-soft); }
   .chk {
     display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); user-select: none;
@@ -210,6 +214,8 @@
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .hidden { display: none !important; }
   .note { font-size: 12px; color: var(--ink-soft); background: var(--bg-sunk); border-radius: 8px; padding: 8px 11px; border-left: 3px solid var(--accent); }
+  .stage-note { font-size: 12.5px; color: var(--ink-soft); margin: -2px 0 10px; }
+  .stage-note b { color: var(--ink); }
 </style>
 
 <header class="app">
@@ -251,7 +257,7 @@
 
       <div class="field">
         <label class="lbl">Optional Seasonings <span class="hint">— tap to include</span></label>
-        <div class="seasonings" id="seasonings"></div>
+        <div id="seasonings"></div>
       </div>
 
       <div class="field">
@@ -288,24 +294,29 @@
  *  Salume Studio — offline charcuterie calculator + drying tracker
  * ------------------------------------------------------------------ */
 
-/* ---- Seasoning master list. pct = grams per 100g of meat (equilibrium). ---- */
+/* ---- Seasoning master list ----
+   pct   = grams per 100g of meat (equilibrium method).
+   stage = "cure" : blended into the salt/cure rub so flavour penetrates
+                     the meat during the 10–14 day cure.
+           "coat" : the exterior crust — pressed onto the outside AFTER
+                     curing, right before wrapping & hanging.               */
 const SEASONINGS = {
-  salt:     { label: "Kosher Salt",   pct: 2.8,  unit: "tsp", gPerTsp: 4.8 },
-  cure2:    { label: "Cure #2",       pct: 0.25, unit: "tsp", gPerTsp: 5.9 },
-  sugar:    { label: "Brown Sugar",   pct: 0.8,  unit: "tsp", gPerTsp: 4.0 },
-  pepper:   { label: "Black Pepper",  pct: 0.6,  unit: "tsp", gPerTsp: 2.3 },
-  paprika:  { label: "Paprika",       pct: 0.5,  unit: "tsp", gPerTsp: 2.3 },
-  garlic:   { label: "Garlic Powder", pct: 0.3,  unit: "tsp", gPerTsp: 3.1 },
-  juniper:  { label: "Juniper",       pct: 0.2,  unit: "tsp", gPerTsp: 2.0 },
-  fennel:   { label: "Fennel Seed",   pct: 0.2,  unit: "tsp", gPerTsp: 2.0 },
-  chili:    { label: "Chili Flakes",  pct: 0.3,  unit: "tsp", gPerTsp: 1.8 },
-  rosemary: { label: "Rosemary",      pct: 0.2,  unit: "tsp", gPerTsp: 1.7 },
-  coriander:{ label: "Coriander",     pct: 0.25, unit: "tsp", gPerTsp: 2.0 },
-  thyme:    { label: "Thyme",         pct: 0.2,  unit: "tsp", gPerTsp: 1.5 },
-  nutmeg:   { label: "Nutmeg",        pct: 0.15, unit: "tsp", gPerTsp: 2.2 },
-  cinnamon: { label: "Cinnamon",      pct: 0.15, unit: "tsp", gPerTsp: 2.6 },
-  clove:    { label: "Clove",         pct: 0.1,  unit: "tsp", gPerTsp: 2.1 },
-  bayleaf:  { label: "Bay (ground)",  pct: 0.1,  unit: "tsp", gPerTsp: 1.8 },
+  salt:     { label: "Kosher Salt",   pct: 2.8,  stage: "cure", gPerTsp: 4.8 },
+  cure2:    { label: "Cure #2",       pct: 0.25, stage: "cure", gPerTsp: 5.9 },
+  sugar:    { label: "Brown Sugar",   pct: 0.8,  stage: "cure", gPerTsp: 4.0 },
+  garlic:   { label: "Garlic Powder", pct: 0.3,  stage: "cure", gPerTsp: 3.1 },
+  juniper:  { label: "Juniper",       pct: 0.2,  stage: "cure", gPerTsp: 2.0 },
+  fennel:   { label: "Fennel Seed",   pct: 0.2,  stage: "cure", gPerTsp: 2.0 },
+  coriander:{ label: "Coriander",     pct: 0.25, stage: "cure", gPerTsp: 2.0 },
+  thyme:    { label: "Thyme",         pct: 0.2,  stage: "cure", gPerTsp: 1.5 },
+  rosemary: { label: "Rosemary",      pct: 0.2,  stage: "cure", gPerTsp: 1.7 },
+  nutmeg:   { label: "Nutmeg",        pct: 0.15, stage: "cure", gPerTsp: 2.2 },
+  cinnamon: { label: "Cinnamon",      pct: 0.15, stage: "cure", gPerTsp: 2.6 },
+  clove:    { label: "Clove",         pct: 0.1,  stage: "cure", gPerTsp: 2.1 },
+  bayleaf:  { label: "Bay (ground)",  pct: 0.1,  stage: "cure", gPerTsp: 1.8 },
+  pepper:   { label: "Black Pepper",  pct: 0.6,  stage: "coat", gPerTsp: 2.3 },
+  paprika:  { label: "Paprika",       pct: 0.5,  stage: "coat", gPerTsp: 2.3 },
+  chili:    { label: "Chili Flakes",  pct: 0.3,  stage: "coat", gPerTsp: 1.8 },
 };
 
 /* Base ingredients are always applied. `optional` lists tunable seasonings
@@ -509,18 +520,24 @@ Object.entries(RECIPES).forEach(([k, r]) => {
   meatSel.appendChild(o);
 });
 
+function chkHTML(key, def) {
+  const s = SEASONINGS[key];
+  return `<label class="chk"><input type="checkbox" data-key="${key}" ${def ? "checked" : ""}>
+      <span class="nm">${s.label}</span><span class="pc">${s.pct}%</span></label>`;
+}
 function renderSeasonings() {
   const r = RECIPES[meatSel.value];
   $("#meatNote").textContent = r.note;
-  const box = $("#seasonings"); box.innerHTML = "";
-  r.optional.forEach(([key, def]) => {
-    const s = SEASONINGS[key];
-    const lab = document.createElement("label");
-    lab.className = "chk";
-    lab.innerHTML = `<input type="checkbox" data-key="${key}" ${def ? "checked" : ""}>
-      <span class="nm">${s.label}</span><span class="pc">${s.pct}%</span>`;
-    box.appendChild(lab);
-  });
+  const cure = r.optional.filter(([k]) => SEASONINGS[k].stage === "cure");
+  const coat = r.optional.filter(([k]) => SEASONINGS[k].stage === "coat");
+  const group = (title, sub, list) => !list.length ? "" :
+    `<div class="seas-group">
+       <div class="seas-head"><span class="n">${title}</span><span>${sub}</span></div>
+       <div class="seasonings">${list.map(([k, d]) => chkHTML(k, d)).join("")}</div>
+     </div>`;
+  $("#seasonings").innerHTML =
+    group("🧂 Into the cure rub", "mixed in — flavours the meat all the way through", cure) +
+    group("🌶️ Exterior crust", "pressed on after curing, just before hanging", coat);
 }
 meatSel.addEventListener("change", renderSeasonings);
 renderSeasonings();
@@ -546,7 +563,7 @@ function gatherRecipe() {
     seen.add(key);
     const s = SEASONINGS[key];
     const g = grams * s.pct / 100;
-    ingredients.push({ key, label: s.label, grams: g, pct: s.pct, base: r.base.includes(key), tsp: tsp(g, key) });
+    ingredients.push({ key, label: s.label, grams: g, pct: s.pct, stage: s.stage, base: r.base.includes(key), tsp: tsp(g, key) });
   });
 
   return {
@@ -561,14 +578,26 @@ function gatherRecipe() {
 
 let lastRecipe = null;
 
-function renderRecipe(R) {
-  lastRecipe = R;
-  const rows = R.ingredients.map(i =>
+function ingRows(list) {
+  return list.map(i =>
     `<tr class="${i.base ? "base" : ""}">
        <td class="nm">${i.label}</td>
        <td class="g">${i.tsp}</td>
        <td class="amt">${i.grams.toFixed(1)} g</td>
      </tr>`).join("");
+}
+
+function renderRecipe(R) {
+  lastRecipe = R;
+  const cure = R.ingredients.filter(i => i.stage === "cure");
+  const coat = R.ingredients.filter(i => i.stage === "coat");
+
+  const coatBlock = coat.length
+    ? `<div class="sec-h">② Seasoning Crust <span style="text-transform:none;font-weight:500">— after the cure, before hanging</span></div>
+       <div class="stage-note">Rinse &amp; pat the meat dry, then press these onto the outside and wrap for hanging.</div>
+       <table class="ing"><tbody>${ingRows(coat)}</tbody></table>`
+    : `<div class="sec-h">② Seasoning Crust</div>
+       <div class="stage-note">No exterior seasonings selected. Add Black Pepper, Paprika or Chili above for a bolder, more flavourful crust.</div>`;
 
   const targetW = R.targetWeight;
   const steps = R.steps.map(s =>
@@ -587,8 +616,11 @@ function renderRecipe(R) {
         <div class="stat"><div class="v">${fmtG(R.startWeight - targetW)}</div><div class="k">To lose</div></div>
       </div>
 
-      <div class="sec-h">Cure &amp; Seasonings <span style="text-transform:none;font-weight:500">(• = essential)</span></div>
-      <table class="ing"><tbody>${rows}</tbody></table>
+      <div class="sec-h">① Cure Rub <span style="text-transform:none;font-weight:500">— mix &amp; apply now (• = essential)</span></div>
+      <div class="stage-note">Blend everything below, rub over every surface, bag &amp; refrigerate <b>${R.cureDays}</b>.</div>
+      <table class="ing"><tbody>${ingRows(cure)}</tbody></table>
+
+      ${coatBlock}
 
       <div class="sec-h">Finished Weight Targets</div>
       <table class="ing"><tbody>
@@ -635,7 +667,7 @@ function saveRecipe(R) {
     startWeight: Math.round(R.startWeight), target: R.target,
     targetWeight: Math.round(R.targetWeight),
     startDate: todayISO(),
-    ingredients: R.ingredients.map(i => ({ label: i.label, grams: +i.grams.toFixed(1) })),
+    ingredients: R.ingredients.map(i => ({ label: i.label, grams: +i.grams.toFixed(1), stage: i.stage })),
     steps: R.steps.map(s => s.replace("{CUREDAYS}", R.cureDays).replace("{TARGET}", R.target).replace("{TARGETW}", fmtG(R.targetWeight))),
     cureDays: R.cureDays,
     logs: [{ date: todayISO(), weight: Math.round(R.startWeight) }],
@@ -827,8 +859,13 @@ function printDoc(title, bodyHTML) {
 }
 
 function recipeBodyHTML(name, emoji, cut, cureDays, target, startW, targetW, ingredients, steps) {
-  const rows = ingredients.map(i => `<tr><td>${i.label}</td><td class="a">${(+i.grams).toFixed(1)} g</td></tr>`).join("");
+  const rowsOf = list => list.map(i => `<tr><td>${i.label}</td><td class="a">${(+i.grams).toFixed(1)} g</td></tr>`).join("");
+  const cure = ingredients.filter(i => (i.stage || "cure") === "cure");
+  const coat = ingredients.filter(i => i.stage === "coat");
   const st = steps.map(s => `<li>${s}</li>`).join("");
+  const coatSec = coat.length
+    ? `<h2>② Seasoning Crust — applied after curing, before hanging</h2><table>${rowsOf(coat)}</table>`
+    : "";
   return `<h1>${emoji} ${name}</h1>
     <div class="sub">${cut} · cure ${cureDays} · target ${target}% weight loss</div>
     <div class="stats">
@@ -836,14 +873,15 @@ function recipeBodyHTML(name, emoji, cut, cureDays, target, startW, targetW, ing
       <div><b>${num(Math.round(targetW))} g</b><span>Finished (${target}%)</span></div>
       <div><b>${num(Math.round(startW - targetW))} g</b><span>Weight to lose</span></div>
     </div>
-    <h2>Ingredients</h2><table>${rows}</table>
+    <h2>① Cure Rub — mixed together &amp; applied at the start</h2><table>${rowsOf(cure)}</table>
+    ${coatSec}
     <h2>Instructions</h2><ol>${st}</ol>`;
 }
 
 function printRecipe(R) {
   printDoc(R.name, recipeBodyHTML(R.name, R.emoji, R.cut, R.cureDays, R.target,
     Math.round(R.startWeight), R.targetWeight,
-    R.ingredients.map(i => ({ label: i.label, grams: i.grams })),
+    R.ingredients.map(i => ({ label: i.label, grams: i.grams, stage: i.stage })),
     R.steps.map(s => s.replace("{CUREDAYS}", R.cureDays).replace("{TARGET}", R.target).replace("{TARGETW}", fmtG(R.targetWeight)).replace(/<\/?b>/g, ""))));
 }
 function printSaved(e) {
