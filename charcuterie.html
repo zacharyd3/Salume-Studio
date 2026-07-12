@@ -309,6 +309,7 @@ const SEASONINGS = {
   fennel:   { label: "Fennel Seed",   pct: 0.2,  stage: "cure", gPerTsp: 2.0 },
   coriander:{ label: "Coriander",     pct: 0.25, stage: "cure", gPerTsp: 2.0 },
   thyme:    { label: "Thyme",         pct: 0.2,  stage: "cure", gPerTsp: 1.5 },
+  oregano:  { label: "Oregano",       pct: 0.2,  stage: "cure", gPerTsp: 1.5 },
   rosemary: { label: "Rosemary",      pct: 0.2,  stage: "cure", gPerTsp: 1.7 },
   nutmeg:   { label: "Nutmeg",        pct: 0.15, stage: "cure", gPerTsp: 2.2 },
   cinnamon: { label: "Cinnamon",      pct: 0.15, stage: "cure", gPerTsp: 2.6 },
@@ -316,6 +317,7 @@ const SEASONINGS = {
   bayleaf:  { label: "Bay (ground)",  pct: 0.1,  stage: "cure", gPerTsp: 1.8 },
   pepper:   { label: "Black Pepper",  pct: 0.6,  stage: "coat", gPerTsp: 2.3 },
   paprika:  { label: "Paprika",       pct: 0.5,  stage: "coat", gPerTsp: 2.3 },
+  pimenton: { label: "Smoked Paprika (Pimentón)", pct: 0.7, stage: "coat", gPerTsp: 2.3 },
   chili:    { label: "Chili Flakes",  pct: 0.3,  stage: "coat", gPerTsp: 1.8 },
 };
 
@@ -343,6 +345,47 @@ const RECIPES = {
       "Wrap snugly in a cheesecloth or breathable casing and tie.",
       "Hang at 55–60°F / 70–80% humidity. Weigh weekly.",
       "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  lomo: {
+    name: "Lomo Embuchado", emoji: "🐷", cut: "Pork loin (Spanish style)",
+    note: "The Spanish cousin of lonzino — a pork loin defined by a heavy coat of smoked paprika (pimentón), garlic &amp; oregano. Cure 10–14 days, hang to ~35%.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["garlic", true], ["oregano", true], ["pimenton", true], ["pepper", true],
+      ["paprika", false], ["coriander", false], ["chili", false], ["bayleaf", false],
+    ],
+    cureDays: "10–14 days",
+    steps: [
+      "Weigh the trimmed pork loin and enter it above.",
+      "Blend the salt, cure, sugar, garlic &amp; oregano into the rub.",
+      "Rub thoroughly over every surface of the loin.",
+      "Vacuum seal (or tight zip bag) and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, and rest uncovered in the fridge overnight.",
+      "Make a paste of smoked pimentón (+ a splash of oil) and coat the whole loin generously — this is the signature crust.",
+      "Stuff into a beef middle casing or wrap snugly in cheesecloth and tie.",
+      "Hang at 55–60°F / 70–80% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  filetto: {
+    name: "Filetto", emoji: "🐷", cut: "Pork tenderloin",
+    note: "Cured pork tenderloin — the fastest whole-muscle pork cure because the piece is so small. Fennel &amp; pepper forward. Cure just 5–7 days.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["fennel", true], ["garlic", true], ["pepper", true], ["juniper", false],
+      ["rosemary", false], ["chili", false], ["coriander", false],
+    ],
+    cureDays: "5–7 days",
+    steps: [
+      "Trim the silverskin off a pork tenderloin; weigh it in.",
+      "Mix all cure ingredients and rub over the tenderloin.",
+      "Vacuum seal and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, rest uncovered in the fridge overnight.",
+      "Coat the outside with cracked pepper &amp; crushed fennel.",
+      "Wrap in cheesecloth and tie a loop for hanging.",
+      "Hang at 55°F / 75% humidity, weighing every few days — it dries fast.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}) — often just 2–3 weeks.",
     ],
   },
   capicola: {
@@ -388,6 +431,26 @@ const RECIPES = {
       "Finished at your {TARGET}% weight-loss target ({TARGETW}) — slice paper-thin.",
     ],
   },
+  venison: {
+    name: "Venison Bresaola", emoji: "🦌", cut: "Venison backstrap / haunch",
+    note: "Lean, deeply flavoured game version of bresaola — juniper &amp; red-wine friendly. Great use for a backstrap. Cure 7–12 days.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["juniper", true], ["pepper", true], ["rosemary", true], ["thyme", true],
+      ["garlic", true], ["bayleaf", false], ["clove", false], ["cinnamon", false],
+    ],
+    cureDays: "7–12 days",
+    steps: [
+      "Trim all silverskin from the venison; weigh it in.",
+      "Crush the juniper &amp; herbs, then mix with salt, cure &amp; sugar.",
+      "Rub the cure over the whole muscle (an optional red-wine soak first adds depth).",
+      "Vacuum seal and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, and rest uncovered in the fridge overnight.",
+      "Coat with cracked pepper, wrap in cheesecloth and tie.",
+      "Hang at 55°F / 75% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}) — slice paper-thin.",
+    ],
+  },
   pancetta: {
     name: "Pancetta", emoji: "🥓", cut: "Pork belly",
     note: "Cured (unsmoked) pork belly. Rolled 'arrotolata' or flat 'tesa'. Cure ~7 days per inch.",
@@ -406,6 +469,25 @@ const RECIPES = {
       "For arrotolata: roll tightly and truss; for tesa: leave flat.",
       "Hang at 55–60°F / 70–75% humidity, weighing weekly.",
       "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  guanciale: {
+    name: "Guanciale", emoji: "🐷", cut: "Pork jowl / cheek",
+    note: "Cured pork jowl — the backbone of carbonara &amp; amatriciana. No casing or stuffing needed. A pepper-heavy crust is traditional. Cure ~7 days, hang to ~30%.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["pepper", true], ["thyme", true], ["garlic", true], ["rosemary", true],
+      ["juniper", false], ["chili", false], ["bayleaf", false],
+    ],
+    cureDays: "6–8 days",
+    steps: [
+      "Trim the pork jowl into a neat slab and weigh it in.",
+      "Mix all cure ingredients and rub into every surface.",
+      "Bag and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, and coat all over with lots of coarse black pepper.",
+      "Poke a hole in one corner and thread twine for hanging.",
+      "Hang at 55–60°F / 70–75% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}) — 30% is plenty for cooking.",
     ],
   },
   coppa: {
@@ -527,7 +609,7 @@ function chkHTML(key, def) {
 }
 function renderSeasonings() {
   const r = RECIPES[meatSel.value];
-  $("#meatNote").textContent = r.note;
+  $("#meatNote").innerHTML = r.note;
   const cure = r.optional.filter(([k]) => SEASONINGS[k].stage === "cure");
   const coat = r.optional.filter(([k]) => SEASONINGS[k].stage === "coat");
   const group = (title, sub, list) => !list.length ? "" :
