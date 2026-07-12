@@ -1,0 +1,860 @@
+<title>Charcuterie Recipe Calculator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7a1f1f">
+<meta name="description" content="Offline charcuterie curing calculator & drying tracker. Single file, works forever.">
+<style>
+  :root {
+    --bg: #f4efe9;
+    --bg-elev: #fffdfa;
+    --bg-sunk: #ece5db;
+    --ink: #2a2320;
+    --ink-soft: #6b5f57;
+    --line: #ddd2c6;
+    --accent: #8a2222;
+    --accent-soft: #b6564b;
+    --accent-ink: #fff;
+    --good: #2f7d4f;
+    --warn: #b26a12;
+    --shadow: 0 1px 2px rgba(60,40,30,.06), 0 8px 24px rgba(60,40,30,.08);
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #17130f;
+    --bg-elev: #221c17;
+    --bg-sunk: #100c09;
+    --ink: #ece3d9;
+    --ink-soft: #a99b8d;
+    --line: #362d25;
+    --accent: #c65b4e;
+    --accent-soft: #8a2c24;
+    --accent-ink: #16110d;
+    --good: #6bc48c;
+    --warn: #e0a24a;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17130f;
+      --bg-elev: #221c17;
+      --bg-sunk: #100c09;
+      --ink: #ece3d9;
+      --ink-soft: #a99b8d;
+      --line: #362d25;
+      --accent: #c65b4e;
+      --accent-soft: #8a2c24;
+      --accent-ink: #16110d;
+      --good: #6bc48c;
+      --warn: #e0a24a;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 16px 64px; }
+
+  header.app {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+    padding: max(10px, env(safe-area-inset-top)) 16px 10px;
+  }
+  .head-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 26px; line-height: 1; }
+  .title { font-weight: 700; font-size: 17px; letter-spacing: .2px; }
+  .title small { display: block; font-weight: 500; font-size: 12px; color: var(--ink-soft); letter-spacing: .3px; }
+  .spacer { flex: 1; }
+  .icon-btn {
+    border: 1px solid var(--line); background: var(--bg-elev); color: var(--ink);
+    width: 40px; height: 40px; border-radius: 12px; cursor: pointer; font-size: 18px;
+    display: grid; place-items: center; transition: transform .08s ease, background .15s;
+  }
+  .icon-btn:active { transform: scale(.94); }
+
+  nav.tabs {
+    display: flex; gap: 6px; margin: 16px 0 20px;
+    background: var(--bg-sunk); padding: 5px; border-radius: 12px;
+  }
+  nav.tabs button {
+    flex: 1; border: 0; background: transparent; color: var(--ink-soft);
+    font: inherit; font-weight: 600; padding: 9px 8px; border-radius: 8px; cursor: pointer;
+    transition: all .15s;
+  }
+  nav.tabs button[aria-selected="true"] {
+    background: var(--bg-elev); color: var(--ink); box-shadow: var(--shadow);
+  }
+  .badge-count {
+    display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px;
+    margin-left: 6px; font-size: 11px; border-radius: 9px;
+    background: var(--accent); color: var(--accent-ink); vertical-align: 1px;
+  }
+
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 18px; margin-bottom: 16px;
+  }
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  label.lbl { display: block; font-weight: 600; font-size: 13px; margin-bottom: 7px; letter-spacing: .2px; }
+  label.lbl .hint { font-weight: 500; color: var(--ink-soft); }
+
+  select, input[type="text"], input[type="number"] {
+    width: 100%; font: inherit; color: var(--ink); background: var(--bg-elev);
+    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px;
+    -webkit-appearance: none; appearance: none;
+  }
+  select {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23998' stroke-width='2' stroke-linecap='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+  .row { display: flex; gap: 10px; }
+  .row > * { min-width: 0; }
+  .grow { flex: 1; }
+  .w-unit { width: 118px; flex: none; }
+
+  .seasonings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 460px) { .seasonings { grid-template-columns: 1fr; } }
+  .chk {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--bg); user-select: none;
+    transition: border-color .12s, background .12s;
+  }
+  .chk input { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+  .chk:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev)); }
+  .chk .nm { font-size: 14px; font-weight: 500; }
+  .chk .pc { margin-left: auto; font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+  .segmented { display: flex; gap: 8px; }
+  .seg {
+    flex: 1; text-align: center; border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 8px; cursor: pointer; background: var(--bg); font-weight: 600;
+  }
+  .seg small { display: block; font-weight: 500; font-size: 11px; color: var(--ink-soft); }
+  .seg:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev)); color: var(--accent); }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+
+  .btn {
+    width: 100%; border: 0; border-radius: 12px; padding: 14px; cursor: pointer;
+    font: inherit; font-weight: 700; font-size: 15px; letter-spacing: .3px;
+    background: var(--accent); color: var(--accent-ink); transition: transform .08s, filter .15s;
+  }
+  .btn:active { transform: scale(.985); }
+  .btn:hover { filter: brightness(1.05); }
+  .btn.ghost { background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+  .btn.sm { padding: 9px 14px; font-size: 13px; width: auto; }
+  .btn.good { background: var(--good); color: #fff; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn-row > .btn { width: auto; flex: 1; min-width: 130px; }
+
+  /* Recipe output */
+  .recipe-title { font-size: 22px; font-weight: 800; letter-spacing: .3px; display: flex; align-items: center; gap: 10px; margin: 0 0 2px; }
+  .recipe-sub { color: var(--ink-soft); font-size: 13px; margin-bottom: 18px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .stat { background: var(--bg-sunk); border-radius: 10px; padding: 12px; text-align: center; }
+  .stat .v { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+  .sec-h { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-soft); margin: 22px 0 10px; }
+  table.ing { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  table.ing td { padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  table.ing tr:last-child td { border-bottom: 0; }
+  table.ing td.amt { text-align: right; font-weight: 700; white-space: nowrap; font-family: var(--mono); }
+  table.ing td.g { color: var(--ink-soft); font-size: 12px; text-align: right; width: 70px; white-space: nowrap; }
+  table.ing tr.base td.nm::after { content: " •"; color: var(--accent); }
+  ol.steps { margin: 0; padding-left: 22px; }
+  ol.steps li { margin-bottom: 7px; padding-left: 4px; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: var(--bg-sunk); color: var(--ink-soft); }
+  .pill.good { background: color-mix(in srgb, var(--good) 20%, transparent); color: var(--good); }
+
+  /* Tracker */
+  .empty { text-align: center; color: var(--ink-soft); padding: 40px 20px; }
+  .empty .big { font-size: 44px; }
+  .track-head { display: flex; align-items: flex-start; gap: 10px; }
+  .track-head .nm { font-weight: 800; font-size: 18px; }
+  .track-head .meta { font-size: 12px; color: var(--ink-soft); }
+  .progress { height: 12px; border-radius: 7px; background: var(--bg-sunk); overflow: hidden; margin: 6px 0; }
+  .progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent-soft), var(--accent)); border-radius: 7px; transition: width .4s ease; }
+  .progress.done > span { background: linear-gradient(90deg, var(--good), color-mix(in srgb,var(--good) 70%, #fff)); }
+  .track-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 14px 0; }
+  .track-stats .s { text-align: center; }
+  .track-stats .s .v { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .track-stats .s .k { font-size: 10px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .5px; }
+  .weighin { display: flex; gap: 8px; margin-top: 12px; }
+  .weighin input { flex: 1; }
+  svg.chart { width: 100%; height: 150px; display: block; margin-top: 6px; overflow: visible; }
+  .chart-wrap { background: var(--bg-sunk); border-radius: 10px; padding: 14px 12px 8px; margin-top: 12px; }
+  .chart-empty { text-align: center; color: var(--ink-soft); font-size: 13px; padding: 22px 0; }
+  details.log summary { cursor: pointer; font-size: 12px; color: var(--ink-soft); margin-top: 10px; font-weight: 600; }
+  details.log ul { margin: 8px 0 0; padding-left: 0; list-style: none; font-size: 13px; font-variant-numeric: tabular-nums; }
+  details.log li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  details.log button { border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; }
+
+  .foot { text-align: center; color: var(--ink-soft); font-size: 12px; margin-top: 26px; line-height: 1.7; }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translX(-50%) translateY(20px);
+    transform: translate(-50%, 20px); background: var(--ink); color: var(--bg);
+    padding: 11px 18px; border-radius: 30px; font-size: 14px; font-weight: 600;
+    box-shadow: 0 8px 30px rgba(0,0,0,.3); opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .hidden { display: none !important; }
+  .note { font-size: 12px; color: var(--ink-soft); background: var(--bg-sunk); border-radius: 8px; padding: 8px 11px; border-left: 3px solid var(--accent); }
+</style>
+
+<header class="app">
+  <div class="head-inner">
+    <span class="logo">🥩</span>
+    <div class="title">Salume Studio<small>Charcuterie calculator &amp; drying tracker</small></div>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">🌙</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-calc" aria-selected="true" aria-controls="view-calc">Calculator</button>
+    <button role="tab" id="tab-track" aria-selected="false" aria-controls="view-track">My Curing <span class="badge-count hidden" id="trackCount">0</span></button>
+  </nav>
+
+  <!-- ============ CALCULATOR ============ -->
+  <section id="view-calc" role="tabpanel" aria-labelledby="tab-calc">
+    <div class="card">
+      <div class="field">
+        <label class="lbl" for="meat">Meat Type</label>
+        <select id="meat"></select>
+        <div id="meatNote" class="note" style="margin-top:10px"></div>
+      </div>
+
+      <div class="field">
+        <label class="lbl" for="weight">Meat Weight</label>
+        <div class="row">
+          <input class="grow" type="number" id="weight" inputmode="decimal" min="0" step="any" placeholder="e.g. 1812" value="1812">
+          <select class="w-unit" id="unit">
+            <option value="1">grams</option>
+            <option value="1000">kilograms</option>
+            <option value="453.59237">pounds</option>
+            <option value="28.349523">ounces</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="lbl">Optional Seasonings <span class="hint">— tap to include</span></label>
+        <div class="seasonings" id="seasonings"></div>
+      </div>
+
+      <div class="field">
+        <label class="lbl">Target Drying <span class="hint">— % weight loss to finish</span></label>
+        <div class="segmented" id="targetSeg">
+          <label class="seg"><input type="radio" name="target" value="30">30%<small>softer</small></label>
+          <label class="seg"><input type="radio" name="target" value="35" checked>35%<small>classic</small></label>
+          <label class="seg"><input type="radio" name="target" value="40">40%<small>firm</small></label>
+        </div>
+      </div>
+
+      <button class="btn" id="calcBtn">Calculate Recipe</button>
+    </div>
+
+    <div id="result"></div>
+  </section>
+
+  <!-- ============ TRACKER ============ -->
+  <section id="view-track" role="tabpanel" aria-labelledby="tab-track" class="hidden">
+    <div id="trackList"></div>
+  </section>
+
+  <div class="foot">
+    Salume Studio · one HTML file · no server · no internet · your data stays in this browser<br>
+    Cure responsibly — always use Cure&nbsp;#2 for dry-cured whole muscle. 🐷🥩🦆
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------ *
+ *  Salume Studio — offline charcuterie calculator + drying tracker
+ * ------------------------------------------------------------------ */
+
+/* ---- Seasoning master list. pct = grams per 100g of meat (equilibrium). ---- */
+const SEASONINGS = {
+  salt:     { label: "Kosher Salt",   pct: 2.8,  unit: "tsp", gPerTsp: 4.8 },
+  cure2:    { label: "Cure #2",       pct: 0.25, unit: "tsp", gPerTsp: 5.9 },
+  sugar:    { label: "Brown Sugar",   pct: 0.8,  unit: "tsp", gPerTsp: 4.0 },
+  pepper:   { label: "Black Pepper",  pct: 0.6,  unit: "tsp", gPerTsp: 2.3 },
+  paprika:  { label: "Paprika",       pct: 0.5,  unit: "tsp", gPerTsp: 2.3 },
+  garlic:   { label: "Garlic Powder", pct: 0.3,  unit: "tsp", gPerTsp: 3.1 },
+  juniper:  { label: "Juniper",       pct: 0.2,  unit: "tsp", gPerTsp: 2.0 },
+  fennel:   { label: "Fennel Seed",   pct: 0.2,  unit: "tsp", gPerTsp: 2.0 },
+  chili:    { label: "Chili Flakes",  pct: 0.3,  unit: "tsp", gPerTsp: 1.8 },
+  rosemary: { label: "Rosemary",      pct: 0.2,  unit: "tsp", gPerTsp: 1.7 },
+  coriander:{ label: "Coriander",     pct: 0.25, unit: "tsp", gPerTsp: 2.0 },
+  thyme:    { label: "Thyme",         pct: 0.2,  unit: "tsp", gPerTsp: 1.5 },
+  nutmeg:   { label: "Nutmeg",        pct: 0.15, unit: "tsp", gPerTsp: 2.2 },
+  cinnamon: { label: "Cinnamon",      pct: 0.15, unit: "tsp", gPerTsp: 2.6 },
+  clove:    { label: "Clove",         pct: 0.1,  unit: "tsp", gPerTsp: 2.1 },
+  bayleaf:  { label: "Bay (ground)",  pct: 0.1,  unit: "tsp", gPerTsp: 1.8 },
+};
+
+/* Base ingredients are always applied. `optional` lists tunable seasonings
+   with their default checked state, so adding a new meat is pure data. */
+const RECIPES = {
+  lonzino: {
+    name: "Lonzino", emoji: "🐷", cut: "Pork loin",
+    note: "Lean pork loin — the beginner-friendly whole-muscle cure. Cure 10–14 days, then hang to ~35%.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["pepper", true], ["garlic", true], ["juniper", true], ["fennel", true],
+      ["paprika", true], ["rosemary", false], ["chili", false], ["coriander", false],
+    ],
+    cureDays: "10–14 days",
+    steps: [
+      "Weigh the trimmed pork loin — enter that number above.",
+      "Mix all cure ingredients in a bowl until evenly blended.",
+      "Rub the mix thoroughly over every surface of the loin.",
+      "Vacuum seal (or use a tight zip bag, pressing out air).",
+      "Refrigerate {CUREDAYS}, flipping the bag daily.",
+      "Rinse briefly under cold water and pat completely dry.",
+      "Dry uncovered in the fridge overnight to form a tacky pellicle.",
+      "Coat the outside with cracked pepper &amp; paprika if using.",
+      "Wrap snugly in a cheesecloth or breathable casing and tie.",
+      "Hang at 55–60°F / 70–80% humidity. Weigh weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  capicola: {
+    name: "Capicola", emoji: "🐷", cut: "Pork collar / coppa muscle",
+    note: "Well-marbled pork collar. Spicy 'hot capicola' leans on paprika &amp; chili. Cure ~14 days.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["pepper", true], ["paprika", true], ["garlic", true], ["fennel", true],
+      ["chili", true], ["nutmeg", false], ["coriander", false], ["clove", false],
+    ],
+    cureDays: "12–16 days",
+    steps: [
+      "Weigh the trimmed pork collar and enter it above.",
+      "Blend all cure ingredients thoroughly.",
+      "Massage the mix into every surface of the collar.",
+      "Vacuum seal and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, then rest uncovered in the fridge overnight.",
+      "Roll heavily in paprika, pepper &amp; chili for the classic crust.",
+      "Stuff into a beef middle casing (or wrap tightly in cheesecloth).",
+      "Prick out air pockets and truss firmly with butcher's twine.",
+      "Hang at 55–60°F / 70–80% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  bresaola: {
+    name: "Bresaola", emoji: "🥩", cut: "Beef eye of round",
+    note: "Air-dried lean beef. Herb-forward with juniper, rosemary &amp; thyme. Cure 10–14 days.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["pepper", true], ["juniper", true], ["rosemary", true], ["thyme", true],
+      ["garlic", true], ["cinnamon", false], ["clove", false], ["bayleaf", false],
+    ],
+    cureDays: "10–14 days",
+    steps: [
+      "Trim all silverskin from the eye of round; weigh it in.",
+      "Grind juniper &amp; herbs, then mix with salt, cure &amp; sugar.",
+      "Rub the cure over the whole muscle.",
+      "Vacuum seal and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse in a splash of red wine or water; pat dry.",
+      "Dry overnight uncovered in the fridge.",
+      "Wrap in cheesecloth / beef bung casing and tie.",
+      "Hang at 55°F / 75% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}) — slice paper-thin.",
+    ],
+  },
+  pancetta: {
+    name: "Pancetta", emoji: "🥓", cut: "Pork belly",
+    note: "Cured (unsmoked) pork belly. Rolled 'arrotolata' or flat 'tesa'. Cure ~7 days per inch.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["pepper", true], ["juniper", true], ["garlic", true], ["nutmeg", true],
+      ["bayleaf", false], ["fennel", false], ["chili", false], ["thyme", false],
+    ],
+    cureDays: "7 days per inch of thickness",
+    steps: [
+      "Square off a skinless pork belly and weigh it.",
+      "Mix all cure ingredients evenly.",
+      "Rub the cure into both sides of the belly.",
+      "Bag and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, and grind fresh pepper over the meat side.",
+      "For arrotolata: roll tightly and truss; for tesa: leave flat.",
+      "Hang at 55–60°F / 70–75% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  coppa: {
+    name: "Coppa", emoji: "🥩", cut: "Pork shoulder (coppa muscle)",
+    note: "Rich, marbled pork shoulder muscle — cousin of capicola. Cure ~14 days.",
+    base: ["salt", "cure2", "sugar"],
+    optional: [
+      ["pepper", true], ["paprika", true], ["garlic", true], ["fennel", true],
+      ["juniper", false], ["chili", false], ["coriander", false], ["nutmeg", false],
+    ],
+    cureDays: "12–16 days",
+    steps: [
+      "Separate and trim the coppa muscle; weigh it in.",
+      "Combine all cure ingredients.",
+      "Coat the muscle thoroughly with the mix.",
+      "Vacuum seal and refrigerate {CUREDAYS}, flipping daily.",
+      "Rinse, pat dry, rest overnight uncovered in the fridge.",
+      "Dust with pepper &amp; paprika, then case or wrap in cheesecloth.",
+      "Truss firmly and prick out any air pockets.",
+      "Hang at 55–60°F / 75% humidity, weighing weekly.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}).",
+    ],
+  },
+  duck: {
+    name: "Duck Prosciutto", emoji: "🦆", cut: "Duck breast",
+    note: "The quickest cure — just a few days salting, ~1–2 weeks hanging. Cure #2 optional for such a short cure.",
+    base: ["salt", "sugar"],
+    optional: [
+      ["cure2", false], ["pepper", true], ["thyme", true], ["juniper", true],
+      ["garlic", false], ["rosemary", false], ["bayleaf", false], ["coriander", false],
+    ],
+    cureDays: "24–48 hours",
+    steps: [
+      "Weigh a skin-on duck breast and enter it above.",
+      "Mix the cure and coat the breast, flesh side heaviest.",
+      "Bag and refrigerate {CUREDAYS} until firm.",
+      "Rinse, pat dry, and dust the flesh with pepper &amp; thyme.",
+      "Wrap in cheesecloth and tie a loop for hanging.",
+      "Hang at 55°F / 70% humidity, weighing every few days.",
+      "Finished at your {TARGET}% weight-loss target ({TARGETW}) — usually 1–2 weeks.",
+    ],
+  },
+};
+
+/* ------------------------------ helpers ------------------------------ */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const STORE = "salume.recipes.v1";
+const THEME = "salume.theme";
+
+function fmtG(g) {
+  if (g >= 1000) return (g / 1000).toFixed(g >= 10000 ? 1 : 2).replace(/\.?0+$/, "") + " kg";
+  if (g >= 100) return Math.round(g) + " g";
+  return (Math.round(g * 10) / 10) + " g";
+}
+function num(g) { return g.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+function toGrams(v, factor) { return v * factor; }
+function tsp(g, key) {
+  const s = SEASONINGS[key];
+  if (!s || !s.gPerTsp) return "";
+  const t = g / s.gPerTsp;
+  if (t < 0.1) return "pinch";
+  if (t < 1) return "¼–½ tsp";
+  return "≈ " + (Math.round(t * 4) / 4) + " tsp";
+}
+function daysBetween(a, b) { return Math.max(0, Math.floor((b - a) / 86400000)); }
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function fmtDate(iso) {
+  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 1900);
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+/* ------------------------------ theme ------------------------------ */
+function applyTheme(mode) {
+  if (mode === "light" || mode === "dark") document.documentElement.setAttribute("data-theme", mode);
+  else document.documentElement.removeAttribute("data-theme");
+  const dark = mode === "dark" || (mode !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  $("#themeBtn").textContent = dark ? "☀️" : "🌙";
+}
+(function initTheme() {
+  const saved = localStorage.getItem(THEME) || "auto";
+  applyTheme(saved);
+  $("#themeBtn").addEventListener("click", () => {
+    const cur = localStorage.getItem(THEME) || "auto";
+    const isDark = cur === "dark" || (cur !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+    const next = isDark ? "light" : "dark";
+    localStorage.setItem(THEME, next); applyTheme(next);
+  });
+})();
+
+/* ------------------------------ tabs ------------------------------ */
+function selectTab(which) {
+  const calc = which === "calc";
+  $("#tab-calc").setAttribute("aria-selected", calc);
+  $("#tab-track").setAttribute("aria-selected", !calc);
+  $("#view-calc").classList.toggle("hidden", !calc);
+  $("#view-track").classList.toggle("hidden", calc);
+  if (!calc) renderTracker();
+}
+$("#tab-calc").addEventListener("click", () => selectTab("calc"));
+$("#tab-track").addEventListener("click", () => selectTab("track"));
+
+/* ------------------------------ calculator UI ------------------------------ */
+const meatSel = $("#meat");
+Object.entries(RECIPES).forEach(([k, r]) => {
+  const o = document.createElement("option");
+  o.value = k; o.textContent = `${r.emoji}  ${r.name} — ${r.cut}`;
+  meatSel.appendChild(o);
+});
+
+function renderSeasonings() {
+  const r = RECIPES[meatSel.value];
+  $("#meatNote").textContent = r.note;
+  const box = $("#seasonings"); box.innerHTML = "";
+  r.optional.forEach(([key, def]) => {
+    const s = SEASONINGS[key];
+    const lab = document.createElement("label");
+    lab.className = "chk";
+    lab.innerHTML = `<input type="checkbox" data-key="${key}" ${def ? "checked" : ""}>
+      <span class="nm">${s.label}</span><span class="pc">${s.pct}%</span>`;
+    box.appendChild(lab);
+  });
+}
+meatSel.addEventListener("change", renderSeasonings);
+renderSeasonings();
+
+/* ------------------------------ compute ------------------------------ */
+function gatherRecipe() {
+  const key = meatSel.value;
+  const r = RECIPES[key];
+  const w = parseFloat($("#weight").value);
+  if (!w || w <= 0) { toast("Enter a valid weight"); $("#weight").focus(); return null; }
+  const grams = toGrams(w, parseFloat($("#unit").value));
+  const target = parseInt($$("input[name=target]").find(i => i.checked).value, 10);
+
+  const chosen = new Set(r.base);
+  $$("#seasonings input:checked").forEach(i => chosen.add(i.dataset.key));
+
+  // Preserve a sensible order: base first, then optional in recipe order.
+  const order = [...r.base, ...r.optional.map(o => o[0])];
+  const ingredients = [];
+  const seen = new Set();
+  order.forEach(key => {
+    if (!chosen.has(key) || seen.has(key)) return;
+    seen.add(key);
+    const s = SEASONINGS[key];
+    const g = grams * s.pct / 100;
+    ingredients.push({ key, label: s.label, grams: g, pct: s.pct, base: r.base.includes(key), tsp: tsp(g, key) });
+  });
+
+  return {
+    meat: key, name: r.name, emoji: r.emoji, cut: r.cut,
+    startWeight: grams, target,
+    targetWeight: grams * (1 - target / 100),
+    w30: grams * 0.70, w35: grams * 0.65, w40: grams * 0.60,
+    cureDays: r.cureDays, ingredients,
+    steps: r.steps,
+  };
+}
+
+let lastRecipe = null;
+
+function renderRecipe(R) {
+  lastRecipe = R;
+  const rows = R.ingredients.map(i =>
+    `<tr class="${i.base ? "base" : ""}">
+       <td class="nm">${i.label}</td>
+       <td class="g">${i.tsp}</td>
+       <td class="amt">${i.grams.toFixed(1)} g</td>
+     </tr>`).join("");
+
+  const targetW = R.targetWeight;
+  const steps = R.steps.map(s =>
+    `<li>${s.replace("{CUREDAYS}", `<b>${R.cureDays}</b>`)
+            .replace("{TARGET}", R.target)
+            .replace("{TARGETW}", `<b>${fmtG(targetW)}</b>`)}</li>`).join("");
+
+  $("#result").innerHTML = `
+    <div class="card" id="recipeCard">
+      <h2 class="recipe-title">${R.emoji} ${R.name}</h2>
+      <div class="recipe-sub">${R.cut} · cure ${R.cureDays} · target ${R.target}% weight loss</div>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="v">${fmtG(R.startWeight)}</div><div class="k">Start</div></div>
+        <div class="stat"><div class="v">${fmtG(targetW)}</div><div class="k">Finish (${R.target}%)</div></div>
+        <div class="stat"><div class="v">${fmtG(R.startWeight - targetW)}</div><div class="k">To lose</div></div>
+      </div>
+
+      <div class="sec-h">Cure &amp; Seasonings <span style="text-transform:none;font-weight:500">(• = essential)</span></div>
+      <table class="ing"><tbody>${rows}</tbody></table>
+
+      <div class="sec-h">Finished Weight Targets</div>
+      <table class="ing"><tbody>
+        <tr><td class="nm">30% loss <span style="color:var(--ink-soft)">· softer</span></td><td class="amt">${fmtG(R.w30)}</td></tr>
+        <tr><td class="nm">35% loss <span style="color:var(--ink-soft)">· classic</span></td><td class="amt">${fmtG(R.w35)}</td></tr>
+        <tr><td class="nm">40% loss <span style="color:var(--ink-soft)">· firm</span></td><td class="amt">${fmtG(R.w40)}</td></tr>
+      </tbody></table>
+
+      <div class="sec-h">Instructions</div>
+      <ol class="steps">${steps}</ol>
+
+      <div class="btn-row" style="margin-top:20px">
+        <button class="btn good" id="saveBtn">＋ Save &amp; Track</button>
+        <button class="btn ghost" id="printBtn">🖨 Print</button>
+      </div>
+    </div>`;
+
+  $("#saveBtn").addEventListener("click", () => saveRecipe(R));
+  $("#printBtn").addEventListener("click", () => printRecipe(R));
+  $("#result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("#calcBtn").addEventListener("click", () => {
+  const R = gatherRecipe();
+  if (R) renderRecipe(R);
+});
+
+/* ------------------------------ storage / tracker ------------------------------ */
+function loadAll() {
+  try { return JSON.parse(localStorage.getItem(STORE)) || []; }
+  catch { return []; }
+}
+function saveAll(list) { localStorage.setItem(STORE, JSON.stringify(list)); updateCount(); }
+function updateCount() {
+  const n = loadAll().length, b = $("#trackCount");
+  b.textContent = n; b.classList.toggle("hidden", n === 0);
+}
+
+function saveRecipe(R) {
+  const list = loadAll();
+  const defName = R.ingredients.some(i => i.key === "garlic") ? `${R.name}` : R.name;
+  const entry = {
+    id: uid(), name: defName, meat: R.meat, emoji: R.emoji,
+    startWeight: Math.round(R.startWeight), target: R.target,
+    targetWeight: Math.round(R.targetWeight),
+    startDate: todayISO(),
+    ingredients: R.ingredients.map(i => ({ label: i.label, grams: +i.grams.toFixed(1) })),
+    steps: R.steps.map(s => s.replace("{CUREDAYS}", R.cureDays).replace("{TARGET}", R.target).replace("{TARGETW}", fmtG(R.targetWeight))),
+    cureDays: R.cureDays,
+    logs: [{ date: todayISO(), weight: Math.round(R.startWeight) }],
+  };
+  list.unshift(entry);
+  saveAll(list);
+  toast("Saved — now tracking 🥩");
+  selectTab("track");
+}
+
+function renderTracker() {
+  const list = loadAll();
+  const box = $("#trackList");
+  if (!list.length) {
+    box.innerHTML = `<div class="card empty">
+        <div class="big">🍖</div>
+        <p><b>Nothing curing yet.</b><br>Build a recipe in the Calculator and hit <b>Save &amp; Track</b> to log its drying journey here.</p>
+        <button class="btn sm ghost" onclick="document.getElementById('tab-calc').click()">Go to Calculator</button>
+      </div>`;
+    return;
+  }
+  box.innerHTML = list.map(cardHTML).join("");
+  list.forEach(wireCard);
+}
+
+function cardHTML(e) {
+  const now = new Date();
+  const start = new Date(e.startDate + "T00:00:00");
+  const days = daysBetween(start, now);
+  const cur = e.logs[e.logs.length - 1].weight;
+  const totalNeed = e.startWeight - e.targetWeight;
+  const lost = e.startWeight - cur;
+  const lossPct = e.startWeight ? (lost / e.startWeight) * 100 : 0;
+  const progPct = totalNeed > 0 ? Math.min(100, Math.max(0, (lost / totalNeed) * 100)) : 0;
+  const done = cur <= e.targetWeight;
+
+  return `<div class="card" data-id="${e.id}">
+    <div class="track-head">
+      <div style="flex:1">
+        <div class="nm">${e.emoji} <span class="ename" data-id="${e.id}">${e.name}</span></div>
+        <div class="meta">Started ${fmtDate(e.startDate)} · day ${days} · ${e.cureDays ? "cure " + e.cureDays : ""}</div>
+      </div>
+      <span class="pill ${done ? "good" : ""}">${done ? "✓ Ready!" : lossPct.toFixed(0) + "% dried"}</span>
+    </div>
+
+    <div class="progress ${done ? "done" : ""}"><span style="width:${progPct}%"></span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-soft)">
+      <span>${progPct.toFixed(0)}% to ${e.target}% target</span>
+      <span>${done ? "Pull it out!" : fmtG(cur - e.targetWeight) + " to go"}</span>
+    </div>
+
+    <div class="track-stats">
+      <div class="s"><div class="v">${num(e.startWeight)}g</div><div class="k">Start</div></div>
+      <div class="s"><div class="v">${num(cur)}g</div><div class="k">Current</div></div>
+      <div class="s"><div class="v">${num(e.targetWeight)}g</div><div class="k">Target</div></div>
+      <div class="s"><div class="v">${days}</div><div class="k">Days</div></div>
+    </div>
+
+    <div class="chart-wrap">${chartSVG(e)}</div>
+
+    <div class="weighin">
+      <input type="number" inputmode="decimal" min="0" step="any" placeholder="Today's weight (g)" data-role="wi" data-id="${e.id}">
+      <button class="btn sm good" data-role="log" data-id="${e.id}">Log</button>
+    </div>
+
+    <details class="log">
+      <summary>Weigh-in history (${e.logs.length}) &amp; actions</summary>
+      <ul>${e.logs.slice().reverse().map((l, i, a) =>
+        `<li><span>${fmtDate(l.date)}</span><span>${num(l.weight)} g</span>
+         <button data-role="dellog" data-id="${e.id}" data-idx="${e.logs.length - 1 - i}">${e.logs.length > 1 ? "✕" : ""}</button></li>`).join("")}</ul>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print recipe</button>
+        <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* SVG drying curve: weight over time, with target line. */
+function chartSVG(e) {
+  const logs = e.logs;
+  if (logs.length < 2) return `<div class="chart-empty">Log another weigh-in to draw the drying curve 📉</div>`;
+  const W = 480, H = 150, padL = 8, padR = 8, padT = 10, padB = 4;
+  const t0 = new Date(logs[0].date).getTime();
+  const tN = new Date(logs[logs.length - 1].date).getTime();
+  const span = Math.max(1, tN - t0);
+  const weights = logs.map(l => l.weight);
+  const yMax = Math.max(...weights, e.startWeight);
+  const yMin = Math.min(...weights, e.targetWeight) * 0.985;
+  const yRange = Math.max(1, yMax - yMin);
+  const x = t => padL + ((new Date(t).getTime() - t0) / span) * (W - padL - padR);
+  const y = w => padT + (1 - (w - yMin) / yRange) * (H - padT - padB);
+
+  const pts = logs.map(l => [x(l.date), y(l.weight)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const area = line + ` L${pts[pts.length - 1][0].toFixed(1)} ${H - padB} L${pts[0][0].toFixed(1)} ${H - padB} Z`;
+  const ty = y(e.targetWeight);
+  const dots = pts.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="var(--accent)"/>`).join("");
+
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Drying curve">
+    <defs><linearGradient id="g${e.id}" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="var(--accent)" stop-opacity=".28"/>
+      <stop offset="1" stop-color="var(--accent)" stop-opacity="0"/>
+    </linearGradient></defs>
+    <line x1="${padL}" x2="${W - padR}" y1="${ty.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="var(--good)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="${W - padR}" y="${(ty - 5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--good)">target ${num(e.targetWeight)}g</text>
+    <path d="${area}" fill="url(#g${e.id})"/>
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+  </svg>`;
+}
+
+function wireCard(e) {
+  const root = $(`.card[data-id="${e.id}"]`);
+  if (!root) return;
+  const logInput = $(`input[data-role="wi"][data-id="${e.id}"]`, root);
+  const doLog = () => {
+    const v = parseFloat(logInput.value);
+    if (!v || v <= 0) { toast("Enter today's weight"); return; }
+    logWeight(e.id, Math.round(v));
+  };
+  $(`button[data-role="log"][data-id="${e.id}"]`, root).addEventListener("click", doLog);
+  logInput.addEventListener("keydown", ev => { if (ev.key === "Enter") doLog(); });
+
+  $(`button[data-role="del"][data-id="${e.id}"]`, root).addEventListener("click", () => {
+    if (confirm(`Delete "${e.name}"? This can't be undone.`)) {
+      saveAll(loadAll().filter(x => x.id !== e.id)); renderTracker(); toast("Deleted");
+    }
+  });
+  $(`button[data-role="print"][data-id="${e.id}"]`, root).addEventListener("click", () => printSaved(e));
+  $$(`button[data-role="dellog"][data-id="${e.id}"]`, root).forEach(b => b.addEventListener("click", () => {
+    const idx = +b.dataset.idx;
+    const list = loadAll(); const item = list.find(x => x.id === e.id);
+    if (item && item.logs.length > 1) { item.logs.splice(idx, 1); saveAll(list); renderTracker(); }
+  }));
+  // Rename by clicking the name
+  const nameEl = $(`.ename[data-id="${e.id}"]`, root);
+  nameEl.style.cursor = "text"; nameEl.title = "Click to rename";
+  nameEl.addEventListener("click", () => {
+    const nn = prompt("Recipe name:", e.name);
+    if (nn && nn.trim()) {
+      const list = loadAll(); const item = list.find(x => x.id === e.id);
+      if (item) { item.name = nn.trim(); saveAll(list); renderTracker(); }
+    }
+  });
+}
+
+function logWeight(id, weight) {
+  const list = loadAll();
+  const e = list.find(x => x.id === id);
+  if (!e) return;
+  const today = todayISO();
+  const existing = e.logs.find(l => l.date === today);
+  if (existing) existing.weight = weight;   // one entry per day
+  else e.logs.push({ date: today, weight });
+  e.logs.sort((a, b) => a.date.localeCompare(b.date));
+  saveAll(list);
+  renderTracker();
+  toast(weight <= e.targetWeight ? "🎉 Target reached — pull it out!" : "Logged " + weight + "g");
+}
+
+/* ------------------------------ printing ------------------------------ */
+function printDoc(title, bodyHTML) {
+  const f = document.createElement("iframe");
+  f.style.position = "fixed"; f.style.right = "0"; f.style.bottom = "0";
+  f.style.width = "0"; f.style.height = "0"; f.style.border = "0";
+  document.body.appendChild(f);
+  const d = f.contentWindow.document;
+  d.open();
+  d.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+    <style>
+      body{font-family:Georgia,'Times New Roman',serif;color:#111;max-width:640px;margin:24px auto;padding:0 20px;line-height:1.5}
+      h1{font-size:26px;margin:0 0 2px;border-bottom:3px double #333;padding-bottom:8px}
+      .sub{color:#555;font-size:13px;margin-bottom:18px}
+      h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:#666;margin:20px 0 8px;border-bottom:1px solid #ccc;padding-bottom:3px}
+      table{width:100%;border-collapse:collapse}
+      td{padding:5px 0;border-bottom:1px dotted #bbb}
+      td.a{text-align:right;font-weight:bold;font-variant-numeric:tabular-nums}
+      ol{padding-left:20px} li{margin-bottom:5px}
+      .stats{display:flex;gap:24px;margin:6px 0 4px}
+      .stats b{display:block;font-size:18px} .stats span{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+      .foot{margin-top:24px;font-size:11px;color:#888;border-top:1px solid #ccc;padding-top:8px}
+    </style></head><body>${bodyHTML}
+    <div class="foot">Generated by Salume Studio · charcuterie calculator</div>
+    </body></html>`);
+  d.close();
+  f.onload = () => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 500); };
+  if (d.readyState === "complete") f.onload();
+}
+
+function recipeBodyHTML(name, emoji, cut, cureDays, target, startW, targetW, ingredients, steps) {
+  const rows = ingredients.map(i => `<tr><td>${i.label}</td><td class="a">${(+i.grams).toFixed(1)} g</td></tr>`).join("");
+  const st = steps.map(s => `<li>${s}</li>`).join("");
+  return `<h1>${emoji} ${name}</h1>
+    <div class="sub">${cut} · cure ${cureDays} · target ${target}% weight loss</div>
+    <div class="stats">
+      <div><b>${num(startW)} g</b><span>Starting weight</span></div>
+      <div><b>${num(Math.round(targetW))} g</b><span>Finished (${target}%)</span></div>
+      <div><b>${num(Math.round(startW - targetW))} g</b><span>Weight to lose</span></div>
+    </div>
+    <h2>Ingredients</h2><table>${rows}</table>
+    <h2>Instructions</h2><ol>${st}</ol>`;
+}
+
+function printRecipe(R) {
+  printDoc(R.name, recipeBodyHTML(R.name, R.emoji, R.cut, R.cureDays, R.target,
+    Math.round(R.startWeight), R.targetWeight,
+    R.ingredients.map(i => ({ label: i.label, grams: i.grams })),
+    R.steps.map(s => s.replace("{CUREDAYS}", R.cureDays).replace("{TARGET}", R.target).replace("{TARGETW}", fmtG(R.targetWeight)).replace(/<\/?b>/g, ""))));
+}
+function printSaved(e) {
+  printDoc(e.name, recipeBodyHTML(e.name, e.emoji, RECIPES[e.meat] ? RECIPES[e.meat].cut : "", e.cureDays, e.target,
+    e.startWeight, e.targetWeight, e.ingredients,
+    e.steps.map(s => s.replace(/<\/?b>/g, ""))));
+}
+
+/* ------------------------------ boot ------------------------------ */
+updateCount();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if ((localStorage.getItem(THEME) || "auto") === "auto") applyTheme("auto");
+});
+</script>
