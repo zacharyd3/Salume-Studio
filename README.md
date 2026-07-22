@@ -35,6 +35,49 @@ docker build -t salume-studio .
 docker run -d --name salume-studio -p 8080:80 --restart unless-stopped salume-studio
 ```
 
+## Data, backups & auto-sync
+
+Your curing entries live in the browser's `localStorage`, but the app also
+**auto-syncs** them to a JSON file on the host so the data survives browser
+clears and is shared across every device that opens the app.
+
+- On load, the app fetches `data/curing.json` from the server (the shared
+  source of truth) and shows it.
+- On every change it writes the file back via **nginx WebDAV** (a debounced
+  `PUT`). The little pill at the top of **My Curing** shows the sync state
+  (`Synced ✓`, `Saving…`, or `Local only` when opened as a bare file).
+
+The file is bind-mounted to the host, so it lands at:
+
+```
+/mnt/user/appdata/salume-studio/curing.json
+```
+
+That directory must exist and be writable by the container:
+
+```bash
+mkdir -p /mnt/user/appdata/salume-studio
+chmod 777 /mnt/user/appdata/salume-studio     # unraid appdata
+```
+
+> No auth sits in front of the data file — anyone on your LAN can read or
+> overwrite it. That's fine for a single-user homelab; `DELETE` is disabled.
+
+### Export / Import
+
+**My Curing** has **Export** (download a JSON backup) and **Import** (load one
+back, merged by entry). This is also how you migrate data from an old browser:
+export there, import here.
+
+To pull data out of an **old** app that predates the Export button, run this in
+that browser's console and import the downloaded file:
+
+```js
+(()=>{const d=localStorage.getItem('salume.recipes.v1')||'[]';
+const b=new Blob([JSON.stringify({app:'salume-studio',version:1,recipes:JSON.parse(d)},null,2)],{type:'application/json'});
+const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='salume-studio-backup.json';a.click();})()
+```
+
 ## The fridge sensor (work in progress)
 
 A NodeMCU V3 (ESP8266) with a DHT sensor lives on a wire in the curing fridge and

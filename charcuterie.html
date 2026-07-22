@@ -278,13 +278,30 @@
 
   <!-- ============ TRACKER ============ -->
   <section id="view-track" role="tabpanel" aria-labelledby="tab-track" class="hidden">
+    <div class="sync-bar">
+      <span id="syncStatus" class="sync-pill" data-state="off">…</span>
+      <span style="flex:1"></span>
+      <button class="btn sm ghost" id="exportBtn" title="Download a JSON backup">⬇ Export</button>
+      <button class="btn sm ghost" id="importBtn" title="Load data from a JSON backup">⬆ Import</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
     <div id="trackList"></div>
   </section>
 
   <div class="foot">
-    Salume Studio · one HTML file · no server · no internet · your data stays in this browser<br>
+    Salume Studio · one HTML file · your data stays on your own hardware<br>
     Cure responsibly — always use Cure&nbsp;#2 for dry-cured whole muscle. 🐷🥩🦆
   </div>
+
+  <style>
+    .sync-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+    .sync-pill{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;
+      border:1px solid var(--line,#8884);color:var(--muted,#888);white-space:nowrap}
+    .sync-pill[data-state="ok"]{color:#3a9d4b;border-color:#3a9d4b66}
+    .sync-pill[data-state="saving"]{color:#c79217;border-color:#c7921766}
+    .sync-pill[data-state="error"]{color:var(--accent,#b23b3b);border-color:#b23b3b66}
+    .sync-pill[data-state="off"]{opacity:.65}
+  </style>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -736,10 +753,107 @@ function loadAll() {
   try { return JSON.parse(localStorage.getItem(STORE)) || []; }
   catch { return []; }
 }
-function saveAll(list) { localStorage.setItem(STORE, JSON.stringify(list)); updateCount(); }
+function saveAll(list) {
+  localStorage.setItem(STORE, JSON.stringify(list));
+  updateCount();
+  scheduleServerPush();
+}
 function updateCount() {
   const n = loadAll().length, b = $("#trackCount");
   b.textContent = n; b.classList.toggle("hidden", n === 0);
+}
+
+/* ---------- server auto-sync (nginx WebDAV) + export / import ---------- */
+const SYNC_URL = "data/curing.json";          // same-origin, relative to the page
+const syncOn = location.protocol === "http:" || location.protocol === "https:";
+let syncTimer = null, applyingRemote = false;
+
+function setSyncStatus(state, text) {
+  const el = $("#syncStatus");
+  if (el) { el.dataset.state = state; el.textContent = text; }
+}
+function setLocal(list) {              // write locally WITHOUT triggering a push (avoids echo)
+  applyingRemote = true;
+  localStorage.setItem(STORE, JSON.stringify(list));
+  updateCount();
+  applyingRemote = false;
+}
+function normalizeList(raw) {          // accept a bare array or a { recipes:[...] } wrapper
+  const list = Array.isArray(raw) ? raw
+    : (raw && Array.isArray(raw.recipes) ? raw.recipes : null);
+  if (!list) return null;
+  return list.filter(e => e && e.id && Array.isArray(e.logs));   // keep only well-formed entries
+}
+
+function scheduleServerPush() {
+  if (!syncOn || applyingRemote) return;
+  clearTimeout(syncTimer);
+  setSyncStatus("saving", "Saving…");
+  syncTimer = setTimeout(pushToServer, 600);
+}
+async function pushToServer() {
+  if (!syncOn) return;
+  try {
+    const res = await fetch(SYNC_URL, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: localStorage.getItem(STORE) || "[]",
+    });
+    if (!res.ok) throw new Error(res.status);
+    setSyncStatus("ok", "Synced ✓");
+  } catch {
+    setSyncStatus("error", "Sync error — saved locally");
+  }
+}
+async function pullFromServer() {
+  if (!syncOn) { setSyncStatus("off", "Local only"); return; }
+  setSyncStatus("saving", "Loading…");
+  try {
+    const res = await fetch(SYNC_URL, { cache: "no-store" });
+    if (res.ok) {
+      const remote = normalizeList(await res.json());
+      if (remote) {
+        setLocal(remote);                                    // server is the shared source of truth
+        if (!$("#view-track").classList.contains("hidden")) renderTracker();
+      }
+      setSyncStatus("ok", "Synced ✓");
+    } else if (res.status === 404) {
+      setSyncStatus("ok", "Synced ✓");
+      if (loadAll().length) pushToServer();                  // no server file yet — seed it from local
+    } else {
+      throw new Error(res.status);
+    }
+  } catch {
+    setSyncStatus("error", "Server unreachable — local only");
+  }
+}
+
+function exportData() {
+  const payload = { app: "salume-studio", version: 1, exportedAt: new Date().toISOString(), recipes: loadAll() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `salume-studio-backup-${todayISO()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast("Exported backup ⬇");
+}
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let incoming;
+    try { incoming = normalizeList(JSON.parse(reader.result)); }
+    catch { incoming = null; }
+    if (!incoming) { toast("Couldn't read that backup file"); return; }
+    const byId = new Map();                                  // merge by id — imported entries win, existing kept
+    loadAll().forEach(e => byId.set(e.id, e));
+    incoming.forEach(e => byId.set(e.id, e));
+    saveAll([...byId.values()]);
+    renderTracker();
+    selectTab("track");
+    toast(`Imported ${incoming.length} item${incoming.length === 1 ? "" : "s"} ⬆`);
+  };
+  reader.readAsText(file);
 }
 
 function saveRecipe(R) {
@@ -975,6 +1089,13 @@ function printSaved(e) {
 
 /* ------------------------------ boot ------------------------------ */
 updateCount();
+$("#exportBtn").addEventListener("click", exportData);
+$("#importBtn").addEventListener("click", () => $("#importFile").click());
+$("#importFile").addEventListener("change", e => {
+  if (e.target.files[0]) importData(e.target.files[0]);
+  e.target.value = "";
+});
+pullFromServer();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if ((localStorage.getItem(THEME) || "auto") === "auto") applyTheme("auto");
 });
