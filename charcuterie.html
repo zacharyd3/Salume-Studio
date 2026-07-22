@@ -1,5 +1,7 @@
 <meta charset="utf-8">
 <title>Charcuterie Recipe Calculator</title>
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#7a1f1f">
 <meta name="description" content="Offline charcuterie curing calculator & drying tracker. Single file, works forever.">
@@ -230,12 +232,12 @@
 
 <div class="wrap">
   <nav class="tabs" role="tablist">
-    <button role="tab" id="tab-calc" aria-selected="true" aria-controls="view-calc">Calculator</button>
-    <button role="tab" id="tab-track" aria-selected="false" aria-controls="view-track">My Curing <span class="badge-count hidden" id="trackCount">0</span></button>
+    <button role="tab" id="tab-track" aria-selected="true" aria-controls="view-track">My Curing <span class="badge-count hidden" id="trackCount">0</span></button>
+    <button role="tab" id="tab-calc" aria-selected="false" aria-controls="view-calc">Calculator</button>
   </nav>
 
   <!-- ============ CALCULATOR ============ -->
-  <section id="view-calc" role="tabpanel" aria-labelledby="tab-calc">
+  <section id="view-calc" role="tabpanel" aria-labelledby="tab-calc" class="hidden">
     <div class="card">
       <div class="field">
         <label class="lbl" for="meat">Meat Type</label>
@@ -277,7 +279,7 @@
   </section>
 
   <!-- ============ TRACKER ============ -->
-  <section id="view-track" role="tabpanel" aria-labelledby="tab-track" class="hidden">
+  <section id="view-track" role="tabpanel" aria-labelledby="tab-track">
     <!-- live curing chamber (MQTT over WebSocket) -->
     <div class="card chamber">
       <div class="chamber-head">
@@ -356,6 +358,8 @@
     .chamber-status[data-state="connecting"]{color:#c79217}
     .chamber-status[data-state="error"]{color:var(--accent,#b23b3b)}
     .chamber-cfg{margin-top:14px;padding-top:14px;border-top:1px solid var(--line,#8883)}
+    .cr[data-stale]{opacity:.4;filter:grayscale(1)}
+    .cr[data-stale] .cr-val::after{content:" ⚠";font-size:16px;filter:none}
   </style>
 </div>
 
@@ -1146,7 +1150,8 @@ function printSaved(e) {
 const CHAMBER = "salume.chamber.v1";
 const CH_DEFAULTS = { tMin: 1, tMax: 5, hMin: 70, hMax: 85 };   // in-fridge drying
 const T_MARGIN = 2, H_MARGIN = 5;                                // amber band just outside target
-let mqtt = null, mqttRetry = null;
+let mqtt = null, mqttRetry = null, chWatch = null, chConnAt = 0, lastLiveAt = 0;
+const STALE_MS = 180000;   // no fresh reading in 3 min (ESP publishes every 60s) => sensor offline
 
 function chamberCfg() {
   try { return JSON.parse(localStorage.getItem(CHAMBER)) || {}; } catch { return {}; }
@@ -1184,8 +1189,23 @@ function showReading(which, value, unit) {
     ? band(v, r.tMin, r.tMax, T_MARGIN)
     : band(v, r.hMin, r.hMax, H_MARGIN);
 }
+function staleCells(on) {
+  $$(".chamber-grid .cr").forEach(c => on ? c.setAttribute("data-stale", "") : c.removeAttribute("data-stale"));
+}
+function stopChWatch() { clearInterval(chWatch); chWatch = null; }
+function startChWatch() {
+  stopChWatch();
+  chWatch = setInterval(() => {          // flip to an obvious error if readings go stale
+    if (!mqtt) return;
+    const last = lastLiveAt || chConnAt;
+    if (last && Date.now() - last > STALE_MS) {
+      staleCells(true);
+      setChamberStatus("error", "No data — check the sensor");
+    }
+  }, 15000);
+}
 function disconnectChamber() {
-  clearTimeout(mqttRetry);
+  clearTimeout(mqttRetry); stopChWatch();
   if (mqtt) { try { mqtt.close(); } catch {} mqtt = null; }
 }
 function connectChamber() {
@@ -1200,12 +1220,23 @@ function connectChamber() {
       username: cfg.user || undefined,
       password: cfg.pass || undefined,
       topics: [tTopic, hTopic],
-      onopen: () => setChamberStatus("ok", "Live"),
-      onmessage: (topic, msg) => {
+      onopen: () => {
+        chConnAt = Date.now(); lastLiveAt = 0;
+        setChamberStatus("connecting", "Connected — waiting for data…");
+        startChWatch();
+      },
+      onmessage: (topic, msg, retained) => {
         if (topic === tTopic) showReading("t", msg, " °C");
         else if (topic === hTopic) showReading("h", msg, " %");
+        else return;
+        if (!retained) {                 // a genuine live update (not the initial retained snapshot)
+          lastLiveAt = Date.now();
+          staleCells(false);
+          setChamberStatus("ok", "Live");
+        }
       },
       onclose: () => {
+        staleCells(true); stopChWatch();
         setChamberStatus("error", "Disconnected — retrying…");
         clearTimeout(mqttRetry); mqttRetry = setTimeout(connectChamber, 5000);
       },
@@ -1246,7 +1277,7 @@ function mqttClient(url, o) {
       const tl = (p[0] << 8) | p[1];
       const topic = dec.decode(p.subarray(2, 2 + tl));
       let i = 2 + tl; if (((hdr >> 1) & 3) > 0) i += 2;                // skip packet id if QoS > 0
-      o.onmessage && o.onmessage(topic, dec.decode(p.subarray(i)));
+      o.onmessage && o.onmessage(topic, dec.decode(p.subarray(i)), hdr & 1);  // hdr&1 = retain flag
     }
   }
   function parse() {
@@ -1273,6 +1304,7 @@ function mqttClient(url, o) {
 
 /* ------------------------------ boot ------------------------------ */
 updateCount();
+selectTab("track");                 // My Curing is the default landing tab
 $("#chGear").addEventListener("click", () => {
   const c = chamberCfg(), r = chRanges();
   $("#cfgUrl").value = c.url || defaultWsUrl();
