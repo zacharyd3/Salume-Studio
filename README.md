@@ -88,9 +88,11 @@ publishes **retained** readings to a Mosquitto broker:
 | `charcuterie/filetto/temperature`  | °C               |
 | `charcuterie/filetto/humidity`     | % RH             |
 
-The **Curing Chamber** panel at the top of the Calculator tab subscribes to these
-and shows live temp/humidity with target bands (green 11–15 °C / 75–85 % RH, amber
-marginal, red out of range). Because a browser can't open a raw MQTT/TCP socket
+The **Curing Chamber** panel at the top of the My Curing tab subscribes to these
+and shows live temp/humidity with target bands — green inside your target, amber
+just outside, red beyond. The ranges are **configurable** in the panel's settings
+and default to **in-fridge drying** (1–5 °C / 70–85 % RH); bump them to ~11–15 °C
+for a dedicated curing chamber. Because a browser can't open a raw MQTT/TCP socket
 (port 1883), it speaks **MQTT over WebSockets** — a tiny client is inlined in the
 page, no library needed.
 
