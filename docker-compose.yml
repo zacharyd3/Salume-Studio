@@ -16,4 +16,5 @@ services:
       # substitutes [IP] with the host IP and [PORT:80] with whatever host
       # port is mapped to container port 80.
       net.unraid.docker.webui: "http://[IP]:[PORT:80]/"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/zacharyd3/Salume-Studio/main/icon.png"
     restart: unless-stopped

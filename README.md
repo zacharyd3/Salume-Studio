@@ -136,6 +136,7 @@ reading shows up immediately. Settings persist in `localStorage`.
 
 ```
 charcuterie.html      # the entire app (calculator, tracker, chamber monitor)
+icon.png              # favicon + unraid Docker icon
 Dockerfile            # nginx:alpine serving the app
 docker-compose.yml    # one-command build/run + data volume
 nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy

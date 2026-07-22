@@ -4,8 +4,9 @@ FROM nginx:1.27-alpine
 # Site config (static serving + optional MQTT WebSocket proxy).
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 
-# The app itself.
+# The app itself, plus the favicon / app icon.
 COPY charcuterie.html /usr/share/nginx/html/charcuterie.html
+COPY icon.png         /usr/share/nginx/html/icon.png
 
 EXPOSE 80
 
