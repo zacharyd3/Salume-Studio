@@ -236,6 +236,34 @@
 
   <!-- ============ CALCULATOR ============ -->
   <section id="view-calc" role="tabpanel" aria-labelledby="tab-calc">
+    <!-- live curing chamber (MQTT over WebSocket) -->
+    <div class="card chamber">
+      <div class="chamber-head">
+        <div class="nm">🌡️ <b>Curing Chamber</b></div>
+        <button class="icon-btn" id="chGear" title="Chamber settings" aria-label="Chamber settings">⚙️</button>
+      </div>
+      <div class="chamber-grid">
+        <div class="cr"><div class="cr-val" id="chTemp">–</div><div class="cr-lbl">TEMP</div><div class="cr-tgt">target 11–15 °C</div></div>
+        <div class="cr"><div class="cr-val" id="chHum">–</div><div class="cr-lbl">HUMIDITY</div><div class="cr-tgt">target 75–85 %</div></div>
+      </div>
+      <div class="chamber-status" id="chStatus" data-state="off">Not configured — tap ⚙️ to connect</div>
+
+      <div class="chamber-cfg hidden" id="chCfg">
+        <div class="field">
+          <label class="lbl" for="cfgUrl">Broker WebSocket URL</label>
+          <input id="cfgUrl" placeholder="ws://192.168.250.3:9001 (or leave the /mqtt default)" autocomplete="off">
+        </div>
+        <div class="row">
+          <div class="field grow"><label class="lbl" for="cfgUser">MQTT user</label><input id="cfgUser" autocomplete="off"></div>
+          <div class="field grow"><label class="lbl" for="cfgPass">MQTT password</label><input id="cfgPass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="field"><label class="lbl" for="cfgTt">Temperature topic</label><input id="cfgTt" placeholder="charcuterie/filetto/temperature" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="cfgHt">Humidity topic</label><input id="cfgHt" placeholder="charcuterie/filetto/humidity" autocomplete="off"></div>
+        <button class="btn good" id="cfgSave">Save &amp; Connect</button>
+        <div class="note" style="margin-top:8px">Credentials stay in this browser (localStorage) and are sent only to your broker.</div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="field">
         <label class="lbl" for="meat">Meat Type</label>
@@ -301,6 +329,22 @@
     .sync-pill[data-state="saving"]{color:#c79217;border-color:#c7921766}
     .sync-pill[data-state="error"]{color:var(--accent,#b23b3b);border-color:#b23b3b66}
     .sync-pill[data-state="off"]{opacity:.65}
+
+    .chamber-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .chamber-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .cr{text-align:center;padding:16px 8px;border-radius:14px;
+      background:var(--bg,#8881);border:1px solid var(--line,#8883)}
+    .cr-val{font-size:34px;font-weight:800;line-height:1.05}
+    .cr-lbl{font-size:11px;letter-spacing:.09em;color:var(--muted,#8a8a8a);margin-top:6px}
+    .cr-tgt{font-size:11px;color:var(--muted,#8a8a8a);margin-top:2px}
+    .cr[data-band="ok"]{border-color:#3a9d4b66} .cr[data-band="ok"] .cr-val{color:#3a9d4b}
+    .cr[data-band="warn"]{border-color:#c7921766} .cr[data-band="warn"] .cr-val{color:#c79217}
+    .cr[data-band="bad"]{border-color:#b23b3b66} .cr[data-band="bad"] .cr-val{color:var(--accent,#b23b3b)}
+    .chamber-status{margin-top:12px;font-size:12px;font-weight:600;text-align:center;color:var(--muted,#8a8a8a)}
+    .chamber-status[data-state="ok"]{color:#3a9d4b}
+    .chamber-status[data-state="connecting"]{color:#c79217}
+    .chamber-status[data-state="error"]{color:var(--accent,#b23b3b)}
+    .chamber-cfg{margin-top:14px;padding-top:14px;border-top:1px solid var(--line,#8883)}
   </style>
 </div>
 
@@ -1087,8 +1131,144 @@ function printSaved(e) {
     e.steps.map(s => s.replace(/<\/?b>/g, ""))));
 }
 
+/* ------------------------------ curing chamber (MQTT / WebSocket) ------------------------------ */
+const CHAMBER = "salume.chamber.v1";
+const TEMP_OK = [11, 15], TEMP_WARN = [8, 18];      // °C — good vs. marginal
+const HUM_OK  = [75, 85], HUM_WARN  = [68, 92];     // % RH
+let mqtt = null, mqttRetry = null;
+
+function chamberCfg() {
+  try { return JSON.parse(localStorage.getItem(CHAMBER)) || {}; } catch { return {}; }
+}
+function defaultWsUrl() {   // same-origin nginx /mqtt proxy; edit to ws://broker:9001 for a direct connection
+  return (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "") + "/mqtt";
+}
+function band(v, ok, warn) {
+  if (v == null || isNaN(v)) return "";
+  if (v >= ok[0] && v <= ok[1]) return "ok";
+  if (v >= warn[0] && v <= warn[1]) return "warn";
+  return "bad";
+}
+function setChamberStatus(state, text) {
+  const el = $("#chStatus"); if (el) { el.dataset.state = state; el.textContent = text; }
+}
+function showReading(which, value, unit, ok, warn) {
+  const el = $(which === "t" ? "#chTemp" : "#chHum");
+  const v = parseFloat(value);
+  el.textContent = isNaN(v) ? "–" : v.toFixed(1) + unit;
+  el.closest(".cr").dataset.band = band(v, ok, warn);
+}
+function disconnectChamber() {
+  clearTimeout(mqttRetry);
+  if (mqtt) { try { mqtt.close(); } catch {} mqtt = null; }
+}
+function connectChamber() {
+  const cfg = chamberCfg();
+  if (!cfg.url) { setChamberStatus("off", "Not configured — tap ⚙️ to connect"); return; }
+  disconnectChamber();
+  setChamberStatus("connecting", "Connecting…");
+  const tTopic = cfg.tTopic || "charcuterie/filetto/temperature";
+  const hTopic = cfg.hTopic || "charcuterie/filetto/humidity";
+  try {
+    mqtt = mqttClient(cfg.url, {
+      username: cfg.user || undefined,
+      password: cfg.pass || undefined,
+      topics: [tTopic, hTopic],
+      onopen: () => setChamberStatus("ok", "Live"),
+      onmessage: (topic, msg) => {
+        if (topic === tTopic) showReading("t", msg, " °C", TEMP_OK, TEMP_WARN);
+        else if (topic === hTopic) showReading("h", msg, " %", HUM_OK, HUM_WARN);
+      },
+      onclose: () => {
+        setChamberStatus("error", "Disconnected — retrying…");
+        clearTimeout(mqttRetry); mqttRetry = setTimeout(connectChamber, 5000);
+      },
+      onerror: () => setChamberStatus("error", "Connection failed"),
+    });
+  } catch { setChamberStatus("error", "Bad WebSocket URL"); }
+}
+
+/* minimal MQTT 3.1.1 over WebSocket — subscribe-only, QoS 0, no dependencies */
+function mqttClient(url, o) {
+  const ws = new WebSocket(url, "mqtt");
+  ws.binaryType = "arraybuffer";
+  let buf = new Uint8Array(0), ping = null, pid = 1;
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const str = s => { const b = enc.encode(s); return [b.length >> 8 & 255, b.length & 255, ...b]; };
+  const remLen = n => { const a = []; do { let d = n % 128; n = Math.floor(n / 128); if (n > 0) d |= 128; a.push(d); } while (n > 0); return a; };
+  const send = bytes => { if (ws.readyState === 1) ws.send(new Uint8Array(bytes)); };
+
+  function connect() {
+    let flags = 0x02;                                                  // clean session
+    const payload = [...str(o.clientId || "salume-" + Math.random().toString(16).slice(2, 8))];
+    if (o.username) { flags |= 0x80; payload.push(...str(o.username)); }
+    if (o.password) { flags |= 0x40; payload.push(...str(o.password)); }
+    const body = [...str("MQTT"), 4, flags, 0, 60, ...payload];        // level 4, keepalive 60s
+    send([0x10, ...remLen(body.length), ...body]);
+  }
+  function subscribe() {
+    const body = [pid >> 8 & 255, pid & 255]; pid++;
+    o.topics.forEach(t => body.push(...str(t), 0));                    // QoS 0
+    send([0x82, ...remLen(body.length), ...body]);
+  }
+  function handle(hdr, p) {
+    const type = hdr >> 4;
+    if (type === 2) {                                                  // CONNACK
+      if (p[1] === 0) { subscribe(); o.onopen && o.onopen(); ping = setInterval(() => send([0xC0, 0]), 45000); }
+      else { o.onerror && o.onerror(p[1]); try { ws.close(); } catch {} }
+    } else if (type === 3) {                                           // PUBLISH
+      const tl = (p[0] << 8) | p[1];
+      const topic = dec.decode(p.subarray(2, 2 + tl));
+      let i = 2 + tl; if (((hdr >> 1) & 3) > 0) i += 2;                // skip packet id if QoS > 0
+      o.onmessage && o.onmessage(topic, dec.decode(p.subarray(i)));
+    }
+  }
+  function parse() {
+    let off = 0;
+    while (off + 2 <= buf.length) {
+      let mult = 1, len = 0, i = off + 1, b;
+      do { if (i >= buf.length) { buf = buf.subarray(off); return; } b = buf[i++]; len += (b & 127) * mult; mult *= 128; } while (b & 128);
+      const total = (i - off) + len;
+      if (buf.length - off < total) break;
+      handle(buf[off], buf.subarray(i, i + len));
+      off += total;
+    }
+    buf = buf.subarray(off);
+  }
+  ws.onopen = connect;
+  ws.onmessage = ev => {
+    const chunk = new Uint8Array(ev.data), merged = new Uint8Array(buf.length + chunk.length);
+    merged.set(buf); merged.set(chunk, buf.length); buf = merged; parse();
+  };
+  ws.onclose = () => { clearInterval(ping); o.onclose && o.onclose(); };
+  ws.onerror = () => { o.onerror && o.onerror(); };
+  return { close: () => { clearInterval(ping); try { ws.close(); } catch {} } };
+}
+
 /* ------------------------------ boot ------------------------------ */
 updateCount();
+$("#chGear").addEventListener("click", () => {
+  const c = chamberCfg();
+  $("#cfgUrl").value = c.url || defaultWsUrl();
+  $("#cfgUser").value = c.user || "";
+  $("#cfgPass").value = c.pass || "";
+  $("#cfgTt").value = c.tTopic || "charcuterie/filetto/temperature";
+  $("#cfgHt").value = c.hTopic || "charcuterie/filetto/humidity";
+  $("#chCfg").classList.toggle("hidden");
+});
+$("#cfgSave").addEventListener("click", () => {
+  localStorage.setItem(CHAMBER, JSON.stringify({
+    url: $("#cfgUrl").value.trim(),
+    user: $("#cfgUser").value,
+    pass: $("#cfgPass").value,
+    tTopic: $("#cfgTt").value.trim() || "charcuterie/filetto/temperature",
+    hTopic: $("#cfgHt").value.trim() || "charcuterie/filetto/humidity",
+  }));
+  $("#chCfg").classList.add("hidden");
+  toast("Chamber settings saved");
+  connectChamber();
+});
+if (chamberCfg().url) connectChamber();
 $("#exportBtn").addEventListener("click", exportData);
 $("#importBtn").addEventListener("click", () => $("#importFile").click());
 $("#importFile").addEventListener("change", e => {

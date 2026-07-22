@@ -78,44 +78,63 @@ const b=new Blob([JSON.stringify({app:'salume-studio',version:1,recipes:JSON.par
 const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='salume-studio-backup.json';a.click();})()
 ```
 
-## The fridge sensor (work in progress)
+## The fridge sensor (live chamber monitor)
 
 A NodeMCU V3 (ESP8266) with a DHT sensor lives on a wire in the curing fridge and
-publishes retained readings to a Mosquitto broker:
+publishes **retained** readings to a Mosquitto broker:
 
 | Topic                              | Value            |
 | ---------------------------------- | ---------------- |
 | `charcuterie/filetto/temperature`  | °C               |
 | `charcuterie/filetto/humidity`     | % RH             |
 
-Because a browser can't open a raw MQTT/TCP socket (port 1883), the app will read
-the broker over **MQTT-over-WebSockets**. NGINX can reverse-proxy that same-origin
-so the page connects to `ws://<host>:8080/mqtt`:
+The **Curing Chamber** panel at the top of the Calculator tab subscribes to these
+and shows live temp/humidity with target bands (green 11–15 °C / 75–85 % RH, amber
+marginal, red out of range). Because a browser can't open a raw MQTT/TCP socket
+(port 1883), it speaks **MQTT over WebSockets** — a tiny client is inlined in the
+page, no library needed.
 
-1. Give Mosquitto a websockets listener (`mosquitto.conf`):
+### 1. Give Mosquitto a websockets listener
 
-   ```
-   listener 1883
-   listener 9001
-   protocol websockets
-   ```
+`mosquitto.conf`:
 
-2. Uncomment the `location /mqtt { … }` block in
-   [`nginx/default.conf`](nginx/default.conf) and point `proxy_pass` at that
-   listener (e.g. `http://192.168.250.3:9001`), then rebuild.
+```
+listener 1883
+listener 9001
+protocol websockets
+```
 
-The in-app monitor panel that subscribes to these topics is the next piece to
-build on top of this.
+(A read-only user scoped to `charcuterie/#` is a good idea for the dashboard —
+you enter its credentials in the panel, and they never leave your browser.)
+Restart Mosquitto.
+
+### 2. Point the app at the broker
+
+The nginx image already proxies same-origin `ws://<host>:<port>/mqtt` through to
+the broker — see the `location /mqtt` block in
+[`nginx/default.conf`](nginx/default.conf); update its `proxy_pass` if your broker
+isn't at `192.168.250.3:9001`, then rebuild. Proxying this way also works when the
+broker sits on a VLAN the browser can't reach directly but the container can.
+
+In the app: **Calculator → 🌡️ Curing Chamber → ⚙️**, enter the MQTT user/password
+(the WebSocket URL defaults to the `/mqtt` proxy; use `ws://<broker>:9001` for a
+direct connection), and **Save & Connect**. Retained messages mean the last
+reading shows up immediately. Settings persist in `localStorage`.
 
 > **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
 > ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
 > A DHT22/AM2302 or SHT31 is worth the swap before trusting the numbers.
+>
+> **Firmware tip:** the sketch's `delay(60000)` blocks `client.loop()` for the
+> whole minute, so with the default 15 s keepalive the broker may drop the
+> connection between publishes. Retained messages hide it from the app, but a
+> non-blocking `millis()` timer that keeps calling `client.loop()` is tidier.
 
 ## Repository layout
 
 ```
-charcuterie.html      # the entire app (calculator + drying tracker)
+charcuterie.html      # the entire app (calculator, tracker, chamber monitor)
 Dockerfile            # nginx:alpine serving the app
-docker-compose.yml    # one-command build/run
-nginx/default.conf    # static serving + optional MQTT WebSocket proxy
+docker-compose.yml    # one-command build/run + data volume
+nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy
 ```
