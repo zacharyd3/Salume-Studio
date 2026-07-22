@@ -83,18 +83,21 @@ const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='sa
 A NodeMCU V3 (ESP8266) with a DHT sensor lives on a wire in the curing fridge and
 publishes **retained** readings to a Mosquitto broker:
 
-| Topic                              | Value            |
-| ---------------------------------- | ---------------- |
-| `charcuterie/filetto/temperature`  | °C               |
-| `charcuterie/filetto/humidity`     | % RH             |
+| Topic                               | Value                       |
+| ----------------------------------- | --------------------------- |
+| `charcuterie/monitor/temperature`   | °C                          |
+| `charcuterie/monitor/humidity`      | % RH                        |
+| `charcuterie/monitor/status`        | `online` / `offline` (LWT)  |
 
 The **Curing Chamber** panel at the top of the My Curing tab subscribes to these
 and shows live temp/humidity with target bands — green inside your target, amber
 just outside, red beyond. The ranges are **configurable** in the panel's settings
 and default to **in-fridge drying** (1–5 °C / 70–85 % RH); bump them to ~11–15 °C
-for a dedicated curing chamber. Because a browser can't open a raw MQTT/TCP socket
-(port 1883), it speaks **MQTT over WebSockets** — a tiny client is inlined in the
-page, no library needed.
+for a dedicated curing chamber. If no fresh reading arrives for 3 minutes, or the
+sensor's `status` last-will reports `offline`, the tiles grey out and the panel
+says the sensor is offline instead of showing stale numbers as "Live". Because a
+browser can't open a raw MQTT/TCP socket (port 1883), it speaks **MQTT over
+WebSockets** — a tiny client is inlined in the page, no library needed.
 
 ### 1. Give Mosquitto a websockets listener
 
@@ -118,19 +121,23 @@ the broker — see the `location /mqtt` block in
 isn't at `192.168.250.3:9001`, then rebuild. Proxying this way also works when the
 broker sits on a VLAN the browser can't reach directly but the container can.
 
-In the app: **Calculator → 🌡️ Curing Chamber → ⚙️**, enter the MQTT user/password
-(the WebSocket URL defaults to the `/mqtt` proxy; use `ws://<broker>:9001` for a
-direct connection), and **Save & Connect**. Retained messages mean the last
-reading shows up immediately. Settings persist in `localStorage`.
+In the app: **My Curing → 🌡️ Curing Chamber → ⚙️**, set the topics if they differ
+from the defaults, leave MQTT user/password blank for an anonymous broker (the
+WebSocket URL defaults to the `/mqtt` proxy; use `ws://<broker>:9001` for a direct
+connection), and **Save & Connect**. Retained messages mean the last reading shows
+up immediately. Settings persist in `localStorage`.
+
+### Home Assistant
+
+The firmware publishes **MQTT discovery** payloads under `homeassistant/`, so once
+the MQTT integration is connected to the broker, HA auto-creates the
+`sensor.charcuterie_temperature` / `sensor.charcuterie_humidity` entities (with
+availability from the `status` last-will) — no YAML needed. Add a `history-graph`
+card with those two entities for temp/humidity history and long-term trends.
 
 > **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
 > ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
 > A DHT22/AM2302 or SHT31 is worth the swap before trusting the numbers.
->
-> **Firmware tip:** the sketch's `delay(60000)` blocks `client.loop()` for the
-> whole minute, so with the default 15 s keepalive the broker may drop the
-> connection between publishes. Retained messages hide it from the app, but a
-> non-blocking `millis()` timer that keeps calling `client.loop()` is tidier.
 
 ## Repository layout
 
