@@ -1,0 +1,9 @@
+services:
+  salume-studio:
+    build: .
+    image: salume-studio:latest
+    container_name: salume-studio
+    ports:
+      # host:container — change 8080 if that port is taken on your box.
+      - "8080:80"
+    restart: unless-stopped
