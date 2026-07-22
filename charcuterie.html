@@ -236,34 +236,6 @@
 
   <!-- ============ CALCULATOR ============ -->
   <section id="view-calc" role="tabpanel" aria-labelledby="tab-calc">
-    <!-- live curing chamber (MQTT over WebSocket) -->
-    <div class="card chamber">
-      <div class="chamber-head">
-        <div class="nm">🌡️ <b>Curing Chamber</b></div>
-        <button class="icon-btn" id="chGear" title="Chamber settings" aria-label="Chamber settings">⚙️</button>
-      </div>
-      <div class="chamber-grid">
-        <div class="cr"><div class="cr-val" id="chTemp">–</div><div class="cr-lbl">TEMP</div><div class="cr-tgt">target 11–15 °C</div></div>
-        <div class="cr"><div class="cr-val" id="chHum">–</div><div class="cr-lbl">HUMIDITY</div><div class="cr-tgt">target 75–85 %</div></div>
-      </div>
-      <div class="chamber-status" id="chStatus" data-state="off">Not configured — tap ⚙️ to connect</div>
-
-      <div class="chamber-cfg hidden" id="chCfg">
-        <div class="field">
-          <label class="lbl" for="cfgUrl">Broker WebSocket URL</label>
-          <input id="cfgUrl" placeholder="ws://192.168.250.3:9001 (or leave the /mqtt default)" autocomplete="off">
-        </div>
-        <div class="row">
-          <div class="field grow"><label class="lbl" for="cfgUser">MQTT user</label><input id="cfgUser" autocomplete="off"></div>
-          <div class="field grow"><label class="lbl" for="cfgPass">MQTT password</label><input id="cfgPass" type="password" autocomplete="new-password"></div>
-        </div>
-        <div class="field"><label class="lbl" for="cfgTt">Temperature topic</label><input id="cfgTt" placeholder="charcuterie/filetto/temperature" autocomplete="off"></div>
-        <div class="field"><label class="lbl" for="cfgHt">Humidity topic</label><input id="cfgHt" placeholder="charcuterie/filetto/humidity" autocomplete="off"></div>
-        <button class="btn good" id="cfgSave">Save &amp; Connect</button>
-        <div class="note" style="margin-top:8px">Credentials stay in this browser (localStorage) and are sent only to your broker.</div>
-      </div>
-    </div>
-
     <div class="card">
       <div class="field">
         <label class="lbl" for="meat">Meat Type</label>
@@ -306,6 +278,45 @@
 
   <!-- ============ TRACKER ============ -->
   <section id="view-track" role="tabpanel" aria-labelledby="tab-track" class="hidden">
+    <!-- live curing chamber (MQTT over WebSocket) -->
+    <div class="card chamber">
+      <div class="chamber-head">
+        <div class="nm">🌡️ <b>Curing Chamber</b></div>
+        <button class="icon-btn" id="chGear" title="Chamber settings" aria-label="Chamber settings">⚙️</button>
+      </div>
+      <div class="chamber-grid">
+        <div class="cr"><div class="cr-val" id="chTemp">–</div><div class="cr-lbl">TEMP</div><div class="cr-tgt" id="chTempTgt">target 1–5 °C</div></div>
+        <div class="cr"><div class="cr-val" id="chHum">–</div><div class="cr-lbl">HUMIDITY</div><div class="cr-tgt" id="chHumTgt">target 70–85 %</div></div>
+      </div>
+      <div class="chamber-status" id="chStatus" data-state="off">Not configured — tap ⚙️ to connect</div>
+
+      <div class="chamber-cfg hidden" id="chCfg">
+        <div class="field">
+          <label class="lbl" for="cfgUrl">Broker WebSocket URL</label>
+          <input id="cfgUrl" placeholder="ws://192.168.250.3:9001 (or leave the /mqtt default)" autocomplete="off">
+        </div>
+        <div class="row">
+          <div class="field grow"><label class="lbl" for="cfgUser">MQTT user <span class="hint">— optional</span></label><input id="cfgUser" autocomplete="off"></div>
+          <div class="field grow"><label class="lbl" for="cfgPass">MQTT password <span class="hint">— optional</span></label><input id="cfgPass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="field"><label class="lbl" for="cfgTt">Temperature topic</label><input id="cfgTt" placeholder="charcuterie/filetto/temperature" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="cfgHt">Humidity topic</label><input id="cfgHt" placeholder="charcuterie/filetto/humidity" autocomplete="off"></div>
+        <div class="field">
+          <label class="lbl">Target ranges <span class="hint">— green when inside, amber just outside</span></label>
+          <div class="row">
+            <input id="cfgTmin" type="number" step="any" inputmode="decimal" placeholder="temp min °C">
+            <input id="cfgTmax" type="number" step="any" inputmode="decimal" placeholder="temp max °C">
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="cfgHmin" type="number" step="any" inputmode="decimal" placeholder="humidity min %">
+            <input id="cfgHmax" type="number" step="any" inputmode="decimal" placeholder="humidity max %">
+          </div>
+        </div>
+        <button class="btn good" id="cfgSave">Save &amp; Connect</button>
+        <div class="note" style="margin-top:8px">Defaults suit in-fridge drying (1–5 °C). Leave user/password blank for an anonymous broker. Everything stays in this browser (localStorage) and is sent only to your broker.</div>
+      </div>
+    </div>
+
     <div class="sync-bar">
       <span id="syncStatus" class="sync-pill" data-state="off">…</span>
       <span style="flex:1"></span>
@@ -1133,30 +1144,45 @@ function printSaved(e) {
 
 /* ------------------------------ curing chamber (MQTT / WebSocket) ------------------------------ */
 const CHAMBER = "salume.chamber.v1";
-const TEMP_OK = [11, 15], TEMP_WARN = [8, 18];      // °C — good vs. marginal
-const HUM_OK  = [75, 85], HUM_WARN  = [68, 92];     // % RH
+const CH_DEFAULTS = { tMin: 1, tMax: 5, hMin: 70, hMax: 85 };   // in-fridge drying
+const T_MARGIN = 2, H_MARGIN = 5;                                // amber band just outside target
 let mqtt = null, mqttRetry = null;
 
 function chamberCfg() {
   try { return JSON.parse(localStorage.getItem(CHAMBER)) || {}; } catch { return {}; }
 }
+function num(v, d) { const n = parseFloat(v); return isNaN(n) ? d : n; }
+function chRanges() {
+  const c = chamberCfg();
+  return { tMin: num(c.tMin, CH_DEFAULTS.tMin), tMax: num(c.tMax, CH_DEFAULTS.tMax),
+           hMin: num(c.hMin, CH_DEFAULTS.hMin), hMax: num(c.hMax, CH_DEFAULTS.hMax) };
+}
 function defaultWsUrl() {   // same-origin nginx /mqtt proxy; edit to ws://broker:9001 for a direct connection
   return (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "") + "/mqtt";
 }
-function band(v, ok, warn) {
+function band(v, min, max, margin) {
   if (v == null || isNaN(v)) return "";
-  if (v >= ok[0] && v <= ok[1]) return "ok";
-  if (v >= warn[0] && v <= warn[1]) return "warn";
+  if (v >= min && v <= max) return "ok";
+  if (v >= min - margin && v <= max + margin) return "warn";
   return "bad";
+}
+function applyTargetLabels() {
+  const r = chRanges();
+  const t = $("#chTempTgt"), h = $("#chHumTgt");
+  if (t) t.textContent = `target ${r.tMin}–${r.tMax} °C`;
+  if (h) h.textContent = `target ${r.hMin}–${r.hMax} %`;
 }
 function setChamberStatus(state, text) {
   const el = $("#chStatus"); if (el) { el.dataset.state = state; el.textContent = text; }
 }
-function showReading(which, value, unit, ok, warn) {
+function showReading(which, value, unit) {
   const el = $(which === "t" ? "#chTemp" : "#chHum");
+  const r = chRanges();
   const v = parseFloat(value);
   el.textContent = isNaN(v) ? "–" : v.toFixed(1) + unit;
-  el.closest(".cr").dataset.band = band(v, ok, warn);
+  el.closest(".cr").dataset.band = which === "t"
+    ? band(v, r.tMin, r.tMax, T_MARGIN)
+    : band(v, r.hMin, r.hMax, H_MARGIN);
 }
 function disconnectChamber() {
   clearTimeout(mqttRetry);
@@ -1176,8 +1202,8 @@ function connectChamber() {
       topics: [tTopic, hTopic],
       onopen: () => setChamberStatus("ok", "Live"),
       onmessage: (topic, msg) => {
-        if (topic === tTopic) showReading("t", msg, " °C", TEMP_OK, TEMP_WARN);
-        else if (topic === hTopic) showReading("h", msg, " %", HUM_OK, HUM_WARN);
+        if (topic === tTopic) showReading("t", msg, " °C");
+        else if (topic === hTopic) showReading("h", msg, " %");
       },
       onclose: () => {
         setChamberStatus("error", "Disconnected — retrying…");
@@ -1248,12 +1274,14 @@ function mqttClient(url, o) {
 /* ------------------------------ boot ------------------------------ */
 updateCount();
 $("#chGear").addEventListener("click", () => {
-  const c = chamberCfg();
+  const c = chamberCfg(), r = chRanges();
   $("#cfgUrl").value = c.url || defaultWsUrl();
   $("#cfgUser").value = c.user || "";
   $("#cfgPass").value = c.pass || "";
   $("#cfgTt").value = c.tTopic || "charcuterie/filetto/temperature";
   $("#cfgHt").value = c.hTopic || "charcuterie/filetto/humidity";
+  $("#cfgTmin").value = r.tMin; $("#cfgTmax").value = r.tMax;
+  $("#cfgHmin").value = r.hMin; $("#cfgHmax").value = r.hMax;
   $("#chCfg").classList.toggle("hidden");
 });
 $("#cfgSave").addEventListener("click", () => {
@@ -1263,11 +1291,15 @@ $("#cfgSave").addEventListener("click", () => {
     pass: $("#cfgPass").value,
     tTopic: $("#cfgTt").value.trim() || "charcuterie/filetto/temperature",
     hTopic: $("#cfgHt").value.trim() || "charcuterie/filetto/humidity",
+    tMin: num($("#cfgTmin").value, CH_DEFAULTS.tMin), tMax: num($("#cfgTmax").value, CH_DEFAULTS.tMax),
+    hMin: num($("#cfgHmin").value, CH_DEFAULTS.hMin), hMax: num($("#cfgHmax").value, CH_DEFAULTS.hMax),
   }));
   $("#chCfg").classList.add("hidden");
+  applyTargetLabels();
   toast("Chamber settings saved");
   connectChamber();
 });
+applyTargetLabels();
 if (chamberCfg().url) connectChamber();
 $("#exportBtn").addEventListener("click", exportData);
 $("#importBtn").addEventListener("click", () => $("#importFile").click());
