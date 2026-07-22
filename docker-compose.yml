@@ -11,4 +11,9 @@ services:
       # is shared across every browser/device. Make sure the host dir exists
       # and is writable by the container (chmod 777 on unraid appdata).
       - /mnt/user/appdata/salume-studio:/usr/share/nginx/html/data
+    labels:
+      # Makes unraid show a clickable "WebUI" link on the Docker tab. unraid
+      # substitutes [IP] with the host IP and [PORT:80] with whatever host
+      # port is mapped to container port 80.
+      net.unraid.docker.webui: "http://[IP]:[PORT:80]/"
     restart: unless-stopped
