@@ -301,8 +301,9 @@
           <div class="field grow"><label class="lbl" for="cfgUser">MQTT user <span class="hint">— optional</span></label><input id="cfgUser" autocomplete="off"></div>
           <div class="field grow"><label class="lbl" for="cfgPass">MQTT password <span class="hint">— optional</span></label><input id="cfgPass" type="password" autocomplete="new-password"></div>
         </div>
-        <div class="field"><label class="lbl" for="cfgTt">Temperature topic</label><input id="cfgTt" placeholder="charcuterie/filetto/temperature" autocomplete="off"></div>
-        <div class="field"><label class="lbl" for="cfgHt">Humidity topic</label><input id="cfgHt" placeholder="charcuterie/filetto/humidity" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="cfgTt">Temperature topic</label><input id="cfgTt" placeholder="charcuterie/monitor/temperature" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="cfgHt">Humidity topic</label><input id="cfgHt" placeholder="charcuterie/monitor/humidity" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="cfgSt">Availability topic <span class="hint">— optional (sensor online/offline)</span></label><input id="cfgSt" placeholder="charcuterie/monitor/status" autocomplete="off"></div>
         <div class="field">
           <label class="lbl">Target ranges <span class="hint">— green when inside, amber just outside</span></label>
           <div class="row">
@@ -1213,19 +1214,25 @@ function connectChamber() {
   if (!cfg.url) { setChamberStatus("off", "Not configured — tap ⚙️ to connect"); return; }
   disconnectChamber();
   setChamberStatus("connecting", "Connecting…");
-  const tTopic = cfg.tTopic || "charcuterie/filetto/temperature";
-  const hTopic = cfg.hTopic || "charcuterie/filetto/humidity";
+  const tTopic = cfg.tTopic || "charcuterie/monitor/temperature";
+  const hTopic = cfg.hTopic || "charcuterie/monitor/humidity";
+  const sTopic = cfg.sTopic || "charcuterie/monitor/status";   // ESP last-will availability
   try {
     mqtt = mqttClient(cfg.url, {
       username: cfg.user || undefined,
       password: cfg.pass || undefined,
-      topics: [tTopic, hTopic],
+      topics: [tTopic, hTopic, sTopic],
       onopen: () => {
         chConnAt = Date.now(); lastLiveAt = 0;
         setChamberStatus("connecting", "Connected — waiting for data…");
         startChWatch();
       },
       onmessage: (topic, msg, retained) => {
+        if (topic === sTopic) {          // sensor's own online/offline (LWT) — flag it instantly
+          if (msg.trim() === "offline") { staleCells(true); setChamberStatus("error", "Sensor offline"); }
+          else if (!lastLiveAt) setChamberStatus("connecting", "Connected — waiting for data…");
+          return;
+        }
         if (topic === tTopic) showReading("t", msg, " °C");
         else if (topic === hTopic) showReading("h", msg, " %");
         else return;
@@ -1310,8 +1317,9 @@ $("#chGear").addEventListener("click", () => {
   $("#cfgUrl").value = c.url || defaultWsUrl();
   $("#cfgUser").value = c.user || "";
   $("#cfgPass").value = c.pass || "";
-  $("#cfgTt").value = c.tTopic || "charcuterie/filetto/temperature";
-  $("#cfgHt").value = c.hTopic || "charcuterie/filetto/humidity";
+  $("#cfgTt").value = c.tTopic || "charcuterie/monitor/temperature";
+  $("#cfgHt").value = c.hTopic || "charcuterie/monitor/humidity";
+  $("#cfgSt").value = c.sTopic || "charcuterie/monitor/status";
   $("#cfgTmin").value = r.tMin; $("#cfgTmax").value = r.tMax;
   $("#cfgHmin").value = r.hMin; $("#cfgHmax").value = r.hMax;
   $("#chCfg").classList.toggle("hidden");
@@ -1321,8 +1329,9 @@ $("#cfgSave").addEventListener("click", () => {
     url: $("#cfgUrl").value.trim(),
     user: $("#cfgUser").value,
     pass: $("#cfgPass").value,
-    tTopic: $("#cfgTt").value.trim() || "charcuterie/filetto/temperature",
-    hTopic: $("#cfgHt").value.trim() || "charcuterie/filetto/humidity",
+    tTopic: $("#cfgTt").value.trim() || "charcuterie/monitor/temperature",
+    hTopic: $("#cfgHt").value.trim() || "charcuterie/monitor/humidity",
+    sTopic: $("#cfgSt").value.trim() || "charcuterie/monitor/status",
     tMin: num($("#cfgTmin").value, CH_DEFAULTS.tMin), tMax: num($("#cfgTmax").value, CH_DEFAULTS.tMax),
     hMin: num($("#cfgHmin").value, CH_DEFAULTS.hMin), hMax: num($("#cfgHmax").value, CH_DEFAULTS.hMax),
   }));
