@@ -8,6 +8,15 @@ with no build step and no runtime dependencies. You can double-click it to run
 it locally, or serve it from the NGINX container below so it's reachable from a
 phone or tablet by the fridge.
 
+It ships with a **library of 16 pre-built recipes** (grouped by pork / beef /
+game / lamb / poultry / salami), each with suggested ingredients and step-by-step
+instructions. Once a batch is curing, the tracker projects an **estimated finish
+date** from its recent drying rate, nudges you when a **weigh-in is overdue**, and
+flags a batch that's **drying too fast** (case-hardening risk). The curing-chamber
+panel can **alert you** when temperature or humidity drifts out of range and keeps
+a **condition-history chart** so you can spot a spike after the fact. Served over
+HTTPS (or `localhost`) it's an **installable PWA** that works fully offline.
+
 ## Run with Docker + NGINX
 
 ```bash
@@ -103,6 +112,16 @@ sensor's `status` last-will reports `offline`, the tiles grey out and the panel
 says the sensor is offline instead of showing stale numbers as "Live". Because a
 browser can't open a raw MQTT/TCP socket (port 1883), it speaks **MQTT over
 WebSockets** — a tiny client is inlined in the page, no library needed.
+
+Tap the **🔔 bell** in the panel to opt into **alerts**: when temperature or
+humidity leaves its target range (or the sensor drops offline) you get a browser
+notification and an in-panel banner, re-nudged every 30 minutes while the problem
+persists, and an all-clear when it recovers. Notifications need permission and a
+secure context (HTTPS or `localhost`); over plain-HTTP LAN the banner still shows.
+Expand **📈 Condition history** to see temp and humidity plotted over the last few
+days with the target band shaded — handy for tracing a bad batch back to a
+humidity swing. History is sampled every 5 minutes and kept in the browser
+(`localStorage`), separate from your synced curing data.
 
 ### 1. Give Mosquitto a websockets listener
 
@@ -203,7 +222,9 @@ down.
 
 ```
 charcuterie.html      # the entire app (calculator, tracker, chamber monitor)
-icon.png              # favicon + unraid Docker icon
+manifest.webmanifest  # PWA manifest (installable app metadata)
+sw.js                 # service worker — offline app shell
+icon.png              # favicon + PWA + unraid Docker icon
 Dockerfile            # nginx:alpine serving the app
 docker-compose.yml    # one-command build/run + data volume
 nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy

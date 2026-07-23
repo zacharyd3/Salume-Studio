@@ -1,0 +1,16 @@
+{
+  "name": "Salume Studio — Charcuterie",
+  "short_name": "Salume Studio",
+  "description": "Offline charcuterie curing calculator & drying tracker, with a live curing-chamber monitor.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4efe9",
+  "theme_color": "#7a1f1f",
+  "icons": [
+    { "src": "icon.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "icon.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "icon.png", "type": "image/png", "sizes": "1254x1254", "purpose": "any maskable" }
+  ]
+}

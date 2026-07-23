@@ -2,8 +2,11 @@
 <title>Charcuterie Recipe Calculator</title>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#7a1f1f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Salume Studio">
 <meta name="description" content="Offline charcuterie curing calculator & drying tracker. Single file, works forever.">
 <style>
   :root {
@@ -284,13 +287,24 @@
     <div class="card chamber">
       <div class="chamber-head">
         <div class="nm">🌡️ <b>Curing Chamber</b></div>
-        <button class="icon-btn" id="chGear" title="Chamber settings" aria-label="Chamber settings">⚙️</button>
+        <div class="chamber-actions">
+          <button class="icon-btn" id="chBell" title="Alert me when temp/humidity leaves range" aria-label="Toggle alerts">🔕</button>
+          <button class="icon-btn" id="chGear" title="Chamber settings" aria-label="Chamber settings">⚙️</button>
+        </div>
       </div>
       <div class="chamber-grid">
         <div class="cr"><div class="cr-val" id="chTemp">–</div><div class="cr-lbl">TEMP</div><div class="cr-tgt" id="chTempTgt">target 1–5 °C</div></div>
         <div class="cr"><div class="cr-val" id="chHum">–</div><div class="cr-lbl">HUMIDITY</div><div class="cr-tgt" id="chHumTgt">target 70–85 %</div></div>
       </div>
       <div class="chamber-status" id="chStatus" data-state="off">Not configured — tap ⚙️ to connect</div>
+      <div class="ch-alert hidden" id="chAlert" data-state="bad" role="alert"></div>
+
+      <details class="ch-hist" id="chHist">
+        <summary>📈 Condition history</summary>
+        <div class="ch-hist-body" id="chHistBody">
+          <div class="chart-empty">Once readings come in, temp &amp; humidity are logged here so you can spot a spike after the fact.</div>
+        </div>
+      </details>
 
       <div class="chamber-cfg hidden" id="chCfg">
         <div class="field">
@@ -361,6 +375,44 @@
     .chamber-cfg{margin-top:14px;padding-top:14px;border-top:1px solid var(--line,#8883)}
     .cr[data-stale]{opacity:.4;filter:grayscale(1)}
     .cr[data-stale] .cr-val::after{content:" ⚠";font-size:16px;filter:none}
+    .chamber-actions{display:flex;gap:6px;align-items:center}
+    .icon-btn[data-on="1"]{filter:none}
+
+    /* Out-of-range alert banner */
+    .ch-alert{margin-top:12px;padding:10px 12px;border-radius:12px;font-size:12.5px;font-weight:600;
+      line-height:1.45;border:1px solid transparent}
+    .ch-alert[data-state="bad"]{color:var(--accent,#b23b3b);background:#b23b3b14;border-color:#b23b3b55}
+    .ch-alert[data-state="warn"]{color:#a9740f;background:#c7921714;border-color:#c7921755}
+
+    /* Condition history */
+    .ch-hist{margin-top:12px}
+    .ch-hist>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--muted,#8a8a8a);
+      list-style:none;user-select:none;padding:4px 0}
+    .ch-hist>summary::-webkit-details-marker{display:none}
+    .ch-hist-body{margin-top:8px}
+    .ch-hist .legend{display:flex;gap:16px;justify-content:center;font-size:11px;color:var(--muted,#8a8a8a);margin-top:6px}
+    .ch-hist .legend b{font-weight:700}
+    .ch-hist .lg-t{color:var(--accent,#b23b3b)} .ch-hist .lg-h{color:#2f6ad0}
+    .ch-hist .hist-meta{text-align:center;font-size:11px;color:var(--muted,#8a8a8a);margin-top:4px}
+
+    /* Batch-card insights */
+    .est-row{margin-top:8px;font-size:12.5px}
+    .est b{font-weight:700}
+    .est.ready{color:var(--good,#2f7d4f);font-weight:600}
+    .est.muted,.est-rate{color:var(--ink-soft,#8a8a8a)}
+    .est-rate{font-size:11px}
+    .badge-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .badge{font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:999px;border:1px solid transparent;line-height:1.3}
+    .badge.warn{color:#a9740f;background:#c7921714;border-color:#c7921755}
+    .badge.bad{color:var(--accent,#b23b3b);background:#b23b3b14;border-color:#b23b3b55}
+
+    /* Per-batch notes */
+    .notes-lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.04em;
+      color:var(--ink-soft,#8a8a8a);margin:10px 0 4px}
+    .notes{width:100%;box-sizing:border-box;min-height:56px;resize:vertical;
+      font:inherit;font-size:13px;line-height:1.45;padding:8px 10px;border-radius:10px;
+      border:1px solid var(--line,#8883);background:var(--bg-elev,#fff);color:inherit}
+    .notes:focus{outline:none;border-color:var(--accent,#b23b3b)}
   </style>
 </div>
 
@@ -799,12 +851,39 @@ $("#tab-calc").addEventListener("click", () => selectTab("calc"));
 $("#tab-track").addEventListener("click", () => selectTab("track"));
 
 /* ------------------------------ calculator UI ------------------------------ */
+// Group the recipe picker into labelled sections so a growing library stays
+// browsable. Any recipe not listed here falls into "More" automatically.
+const RECIPE_GROUPS = [
+  ["🐷 Pork — whole muscle", ["lonzino", "lomo", "filetto", "capicola", "coppa", "guanciale", "pancetta", "prosciutto"]],
+  ["🥩 Beef", ["bresaola", "cecina", "bundner"]],
+  ["🦌 Game", ["venison"]],
+  ["🐑 Lamb", ["lamb"]],
+  ["🦆 Poultry", ["duck", "goose"]],
+  ["🌶️ Salami — ground & fermented", ["soppressata"]],
+];
 const meatSel = $("#meat");
-Object.entries(RECIPES).forEach(([k, r]) => {
-  const o = document.createElement("option");
-  o.value = k; o.textContent = `${r.emoji}  ${r.name} — ${r.cut}`;
-  meatSel.appendChild(o);
-});
+(function buildMeatOptions() {
+  const placed = new Set();
+  const addOption = (parent, k) => {
+    const r = RECIPES[k]; if (!r) return;
+    const o = document.createElement("option");
+    o.value = k; o.textContent = `${r.emoji}  ${r.name} — ${r.cut}`;
+    parent.appendChild(o); placed.add(k);
+  };
+  RECIPE_GROUPS.forEach(([label, keys]) => {
+    const keep = keys.filter(k => RECIPES[k]);
+    if (!keep.length) return;
+    const g = document.createElement("optgroup"); g.label = label;
+    keep.forEach(k => addOption(g, k));
+    meatSel.appendChild(g);
+  });
+  const leftover = Object.keys(RECIPES).filter(k => !placed.has(k));
+  if (leftover.length) {
+    const g = document.createElement("optgroup"); g.label = "More";
+    leftover.forEach(k => addOption(g, k));
+    meatSel.appendChild(g);
+  }
+})();
 
 function chkHTML(key, def) {
   const s = SEASONINGS[key];
@@ -1076,6 +1155,36 @@ function renderTracker() {
   list.forEach(wireCard);
 }
 
+/* Drying rate over a recent window (default 14 days), in grams/day.
+   Using a recent window rather than the whole run keeps the estimate honest
+   as drying naturally slows down toward the finish. */
+function recentRate(e, windowDays = 14) {
+  const logs = e.logs;
+  if (logs.length < 2) return null;
+  const lastT = new Date(logs[logs.length - 1].date + "T00:00:00").getTime();
+  const windowMs = windowDays * 86400000;
+  let seg = logs.filter(l => lastT - new Date(l.date + "T00:00:00").getTime() <= windowMs);
+  if (seg.length < 2) seg = logs.slice(-2);
+  const a = seg[0], b = seg[seg.length - 1];
+  const d = daysBetween(new Date(a.date + "T00:00:00"), new Date(b.date + "T00:00:00"));
+  if (d <= 0) return null;
+  const gPerDay = (a.weight - b.weight) / d;
+  return { gPerDay, pctPerDay: e.startWeight ? gPerDay / e.startWeight * 100 : 0, days: d };
+}
+
+/* Project a ready-date from the recent drying rate. Null if done, stalled,
+   or there isn't enough data yet. */
+function estimateReady(e) {
+  const cur = e.logs[e.logs.length - 1].weight;
+  if (cur <= e.targetWeight) return null;
+  const rr = recentRate(e);
+  if (!rr || rr.gPerDay <= 0) return null;
+  const daysLeft = Math.max(1, Math.ceil((cur - e.targetWeight) / rr.gPerDay));
+  const ready = new Date(); ready.setHours(0, 0, 0, 0);
+  ready.setDate(ready.getDate() + daysLeft);
+  return { daysLeft, readyISO: ready.toISOString().slice(0, 10), pctPerDay: rr.pctPerDay };
+}
+
 function cardHTML(e) {
   const now = new Date();
   const start = new Date(e.startDate + "T00:00:00");
@@ -1086,6 +1195,26 @@ function cardHTML(e) {
   const lossPct = e.startWeight ? (lost / e.startWeight) * 100 : 0;
   const progPct = totalNeed > 0 ? Math.min(100, Math.max(0, (lost / totalNeed) * 100)) : 0;
   const done = cur <= e.targetWeight;
+
+  // Insights: projected finish, weigh-in nudge, and a too-fast-drying warning.
+  const est = estimateReady(e);
+  const daysSinceWeigh = daysBetween(new Date(e.logs[e.logs.length - 1].date + "T00:00:00"), now);
+  const dueWeigh = !done && daysSinceWeigh >= 7;
+  const rr = recentRate(e);
+  const fast = !done && rr && rr.pctPerDay > 2 && days >= 2;
+
+  const estLine = done
+    ? `<span class="est ready">✓ At or past target — pull it out</span>`
+    : est
+      ? `<span class="est">📅 Est. ready <b>${fmtDate(est.readyISO)}</b> · ~${est.daysLeft} day${est.daysLeft === 1 ? "" : "s"} <span class="est-rate">(${est.pctPerDay.toFixed(1)}%/day)</span></span>`
+      : `<span class="est muted">📅 Log another weigh-in to project a finish date</span>`;
+
+  const badges = [
+    dueWeigh ? `<span class="badge warn">⚖️ Due for weigh-in · ${daysSinceWeigh}d since last</span>` : "",
+    fast ? `<span class="badge bad">⚡ Drying fast (${rr.pctPerDay.toFixed(1)}%/day) — risk of case hardening; raise humidity</span>` : "",
+  ].filter(Boolean).join("");
+
+  const notesVal = (e.notes || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   return `<div class="card" data-id="${e.id}">
     <div class="track-head">
@@ -1102,6 +1231,9 @@ function cardHTML(e) {
       <span>${done ? "Pull it out!" : fmtG(cur - e.targetWeight) + " to go"}</span>
     </div>
 
+    <div class="est-row">${estLine}</div>
+    ${badges ? `<div class="badge-row">${badges}</div>` : ""}
+
     <div class="track-stats">
       <div class="s"><div class="v">${num(e.startWeight)}g</div><div class="k">Start</div></div>
       <div class="s"><div class="v">${num(cur)}g</div><div class="k">Current</div></div>
@@ -1117,7 +1249,10 @@ function cardHTML(e) {
     </div>
 
     <details class="log">
-      <summary>Weigh-in history (${e.logs.length}) &amp; actions</summary>
+      <summary>Weigh-in history (${e.logs.length}) · notes · actions</summary>
+      <label class="notes-lbl" for="notes-${e.id}">📝 Notes</label>
+      <textarea class="notes" id="notes-${e.id}" data-role="notes" data-id="${e.id}"
+        placeholder="Observations — wiped mould day 12, smells nutty, bumped humidity…">${notesVal}</textarea>
       <ul>${e.logs.slice().reverse().map((l, i, a) =>
         `<li><span>${fmtDate(l.date)}</span><span>${num(l.weight)} g</span>
          <button data-role="dellog" data-id="${e.id}" data-idx="${e.logs.length - 1 - i}">${e.logs.length > 1 ? "✕" : ""}</button></li>`).join("")}</ul>
@@ -1180,6 +1315,19 @@ function wireCard(e) {
       saveAll(loadAll().filter(x => x.id !== e.id)); renderTracker(); toast("Deleted");
     }
   });
+  // Notes — save quietly as you type (debounced), without re-rendering the
+  // card so the cursor and open <details> stay put.
+  const notesEl = $(`textarea[data-role="notes"][data-id="${e.id}"]`, root);
+  if (notesEl) {
+    let notesTimer = null;
+    const saveNotes = () => {
+      const list = loadAll(); const item = list.find(x => x.id === e.id);
+      if (item && (item.notes || "") !== notesEl.value) { item.notes = notesEl.value; saveAll(list); }
+    };
+    notesEl.addEventListener("input", () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotes, 500); });
+    notesEl.addEventListener("blur", () => { clearTimeout(notesTimer); saveNotes(); });
+  }
+
   $(`button[data-role="print"][data-id="${e.id}"]`, root).addEventListener("click", () => printSaved(e));
   $$(`button[data-role="dellog"][data-id="${e.id}"]`, root).forEach(b => b.addEventListener("click", () => {
     const idx = +b.dataset.idx;
@@ -1275,10 +1423,22 @@ function printSaved(e) {
 
 /* ------------------------------ curing chamber (MQTT / WebSocket) ------------------------------ */
 const CHAMBER = "salume.chamber.v1";
+const CH_HIST = "salume.chamber.hist.v1";
+const CH_ALERTS = "salume.chamber.alerts.v1";
 const CH_DEFAULTS = { tMin: 1, tMax: 5, hMin: 70, hMax: 85 };   // in-fridge drying
 const T_MARGIN = 2, H_MARGIN = 5;                                // amber band just outside target
 let mqtt = null, mqttRetry = null, chWatch = null, chConnAt = 0, lastLiveAt = 0, sensorOnline = null;
 const STALE_MS = 180000;   // no fresh reading in 3 min (ESP publishes every 15s) => sensor offline
+
+// Condition history + alerting state
+const HIST_SAMPLE_MS = 5 * 60000;      // record at most one point every 5 min
+const HIST_MAX_AGE_MS = 3 * 86400000;  // keep ~3 days of history
+const HIST_MAX_PTS = 900;
+const ALERT_RENOTIFY_MS = 30 * 60000;  // re-nudge a persistent problem every 30 min
+let chLatest = { temp: null, hum: null };
+let chSensorState = "waiting";         // ok | waiting | stale | offline
+let histSampledAt = 0;
+let alertsOn = false, alertPrev = "", alertNotifiedAt = 0;
 
 function chamberCfg() {
   try { return JSON.parse(localStorage.getItem(CHAMBER)) || {}; } catch { return {}; }
@@ -1311,6 +1471,7 @@ function showReading(which, value, unit) {
   const el = $(which === "t" ? "#chTemp" : "#chHum");
   const r = chRanges();
   const v = parseFloat(value);
+  chLatest[which === "t" ? "temp" : "hum"] = isNaN(v) ? null : v;
   el.textContent = isNaN(v) ? "–" : v.toFixed(1) + unit;
   el.closest(".cr").dataset.band = which === "t"
     ? band(v, r.tMin, r.tMax, T_MARGIN)
@@ -1321,8 +1482,10 @@ function staleCells(on) {
 }
 function markFresh() {          // treat the current reading as current & show "Live"
   lastLiveAt = Date.now();
+  chSensorState = "ok";
   staleCells(false);
   setChamberStatus("ok", "Live");
+  recordChamberSample();
 }
 function stopChWatch() { clearInterval(chWatch); chWatch = null; }
 function startChWatch() {
@@ -1333,6 +1496,7 @@ function startChWatch() {
     if (last && Date.now() - last > STALE_MS) {
       staleCells(true);
       setChamberStatus("error", "No data — check the sensor");
+      if (chSensorState !== "stale") { chSensorState = "stale"; evaluateAlerts(); }
     }
   }, 15000);
 }
@@ -1354,17 +1518,18 @@ function connectChamber() {
       password: cfg.pass || undefined,
       topics: [tTopic, hTopic, sTopic],
       onopen: () => {
-        chConnAt = Date.now(); lastLiveAt = 0; sensorOnline = null;
+        chConnAt = Date.now(); lastLiveAt = 0; sensorOnline = null; chSensorState = "waiting";
         setChamberStatus("connecting", "Connected — waiting for data…");
         startChWatch();
       },
       onmessage: (topic, msg, retained) => {
         if (topic === sTopic) {          // sensor's own online/offline (LWT / availability)
           sensorOnline = msg.trim() !== "offline";
-          if (!sensorOnline) { staleCells(true); setChamberStatus("error", "Sensor offline"); }
+          if (!sensorOnline) { staleCells(true); setChamberStatus("error", "Sensor offline"); chSensorState = "offline"; }
           // Sensor reports online → the retained reading it left behind is current,
           // so show it as Live immediately instead of waiting for the next publish.
           else markFresh();
+          evaluateAlerts();
           return;
         }
         if (topic === tTopic) showReading("t", msg, " °C");
@@ -1373,15 +1538,123 @@ function connectChamber() {
         // A genuine live publish is always current; a retained snapshot is current
         // too as long as the sensor's availability says it's still online.
         if (!retained || sensorOnline) markFresh();
+        evaluateAlerts();
       },
       onclose: () => {
         staleCells(true); stopChWatch();
         setChamberStatus("error", "Disconnected — retrying…");
+        chSensorState = "offline"; evaluateAlerts();
         clearTimeout(mqttRetry); mqttRetry = setTimeout(connectChamber, 5000);
       },
       onerror: () => setChamberStatus("error", "Connection failed"),
     });
   } catch { setChamberStatus("error", "Bad WebSocket URL"); }
+}
+
+/* ---------- condition history (temp + humidity over time) ---------- */
+function chHistLoad() { try { return JSON.parse(localStorage.getItem(CH_HIST)) || []; } catch { return []; } }
+function chHistSave(a) { try { localStorage.setItem(CH_HIST, JSON.stringify(a)); } catch {} }
+
+function recordChamberSample() {
+  if (chLatest.temp == null || chLatest.hum == null) return;
+  const now = Date.now();
+  if (now - histSampledAt < HIST_SAMPLE_MS) return;   // throttle: one point / 5 min
+  histSampledAt = now;
+  const hist = chHistLoad();
+  hist.push({ t: now, temp: +chLatest.temp.toFixed(1), hum: +chLatest.hum.toFixed(1) });
+  const cutoff = now - HIST_MAX_AGE_MS;
+  let pruned = hist.filter(p => p.t >= cutoff);
+  if (pruned.length > HIST_MAX_PTS) pruned = pruned.slice(pruned.length - HIST_MAX_PTS);
+  chHistSave(pruned);
+  const d = $("#chHist");
+  if (d && d.open) renderChamberHistory();
+}
+
+/* One compact series with its target band shaded green. */
+function seriesSVG(pts, valOf, color, tgtMin, tgtMax, unit) {
+  const vals = pts.map(valOf).filter(v => v != null && !isNaN(v));
+  if (vals.length < 2) return "";
+  const W = 480, H = 84, padT = 8, padB = 8, padL = 6, padR = 6;
+  const t0 = pts[0].t, tN = pts[pts.length - 1].t, span = Math.max(1, tN - t0);
+  let lo = Math.min(...vals, tgtMin), hi = Math.max(...vals, tgtMax);
+  const pad = (hi - lo) * 0.12 || 1; lo -= pad; hi += pad;
+  const range = Math.max(0.001, hi - lo);
+  const x = t => padL + ((t - t0) / span) * (W - padL - padR);
+  const y = v => padT + (1 - (v - lo) / range) * (H - padT - padB);
+  const seq = pts.filter(p => valOf(p) != null && !isNaN(valOf(p)));
+  const line = seq.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(valOf(p)).toFixed(1)).join(" ");
+  const bTop = y(tgtMax), bBot = y(tgtMin);
+  const last = seq[seq.length - 1];
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Condition history">
+    <rect x="${padL}" y="${bTop.toFixed(1)}" width="${W - padL - padR}" height="${Math.max(0, bBot - bTop).toFixed(1)}" fill="var(--good)" opacity=".12"/>
+    <line x1="${padL}" x2="${W - padR}" y1="${bTop.toFixed(1)}" y2="${bTop.toFixed(1)}" stroke="var(--good)" stroke-width="1" stroke-dasharray="4 4" opacity=".6"/>
+    <line x1="${padL}" x2="${W - padR}" y1="${bBot.toFixed(1)}" y2="${bBot.toFixed(1)}" stroke="var(--good)" stroke-width="1" stroke-dasharray="4 4" opacity=".6"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(last.t).toFixed(1)}" cy="${y(valOf(last)).toFixed(1)}" r="2.6" fill="${color}"/>
+    <text x="${W - padR}" y="${padT + 8}" text-anchor="end" font-size="10" fill="${color}">${valOf(last).toFixed(1)}${unit}</text>
+  </svg>`;
+}
+
+function renderChamberHistory() {
+  const body = $("#chHistBody"); if (!body) return;
+  const hist = chHistLoad();
+  if (hist.length < 2) {
+    body.innerHTML = `<div class="chart-empty">Once readings come in, temp &amp; humidity are logged here so you can spot a spike after the fact.</div>`;
+    return;
+  }
+  const r = chRanges();
+  const last = hist[hist.length - 1];
+  const spanH = (last.t - hist[0].t) / 3600000;
+  body.innerHTML =
+    seriesSVG(hist, p => p.temp, "var(--accent)", r.tMin, r.tMax, " °C") +
+    seriesSVG(hist, p => p.hum, "#2f6ad0", r.hMin, r.hMax, " %") +
+    `<div class="legend"><span class="lg-t">■ Temp <b>${last.temp} °C</b></span><span class="lg-h">■ Humidity <b>${last.hum} %</b></span></div>
+     <div class="hist-meta">${hist.length} readings over ${spanH < 1 ? "<1" : Math.round(spanH)} h · green band = your target range</div>`;
+}
+
+/* ---------- out-of-range alerting ---------- */
+function chNotify(title, body) {
+  if (!alertsOn) return;
+  try {
+    if ("Notification" in window && Notification.permission === "granted")
+      new Notification(title, { body, icon: "icon.png", tag: "salume-chamber", renotify: true });
+  } catch {}
+}
+function updateBell() {
+  const b = $("#chBell"); if (!b) return;
+  b.textContent = alertsOn ? "🔔" : "🔕";
+  b.dataset.on = alertsOn ? "1" : "0";
+  b.title = alertsOn
+    ? "Alerts on — you'll be notified when temp/humidity leaves range"
+    : "Alerts off — tap to be notified when temp/humidity leaves range";
+}
+function evaluateAlerts() {
+  const r = chRanges();
+  const issues = [];
+  if (chSensorState === "offline") issues.push("Sensor offline");
+  else if (chSensorState === "stale") issues.push("No data from the sensor");
+  const tb = band(chLatest.temp, r.tMin, r.tMax, T_MARGIN);
+  const hb = band(chLatest.hum, r.hMin, r.hMax, H_MARGIN);
+  if (chLatest.temp != null && tb === "bad")
+    issues.push(`Temp ${chLatest.temp.toFixed(1)} °C — outside ${r.tMin}–${r.tMax} °C`);
+  if (chLatest.hum != null && hb === "bad")
+    issues.push(`Humidity ${chLatest.hum.toFixed(1)} % — outside ${r.hMin}–${r.hMax} %`);
+
+  const banner = $("#chAlert");
+  if (banner) {
+    if (issues.length) { banner.classList.remove("hidden"); banner.innerHTML = "⚠️ " + issues.join(" · "); }
+    else banner.classList.add("hidden");
+  }
+
+  const sig = issues.join(" | ");
+  const now = Date.now();
+  if (issues.length && (sig !== alertPrev || now - alertNotifiedAt > ALERT_RENOTIFY_MS)) {
+    chNotify("Curing chamber needs attention", issues.join("\n"));
+    alertNotifiedAt = now;
+  } else if (!issues.length && alertPrev) {
+    chNotify("Curing chamber back to normal ✓", "Temperature & humidity are within range again.");
+  }
+  alertPrev = sig;
 }
 
 /* minimal MQTT 3.1.1 over WebSocket — subscribe-only, QoS 0, no dependencies */
@@ -1469,10 +1742,34 @@ $("#cfgSave").addEventListener("click", () => {
   }));
   $("#chCfg").classList.add("hidden");
   applyTargetLabels();
+  if ($("#chHist").open) renderChamberHistory();
+  evaluateAlerts();
   toast("Chamber settings saved");
   connectChamber();
 });
 applyTargetLabels();
+
+// Alerts toggle (browser notifications when readings leave range)
+alertsOn = localStorage.getItem(CH_ALERTS) === "1";
+updateBell();
+$("#chBell").addEventListener("click", async () => {
+  if (!alertsOn) {
+    if ("Notification" in window && Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch {}
+    }
+    alertsOn = true;
+    toast(("Notification" in window && Notification.permission === "granted")
+      ? "Alerts on 🔔" : "Alerts on — banner only (notifications blocked)");
+  } else {
+    alertsOn = false; toast("Alerts off 🔕");
+  }
+  localStorage.setItem(CH_ALERTS, alertsOn ? "1" : "0");
+  updateBell();
+});
+
+// Condition-history chart: render when the panel is opened
+$("#chHist").addEventListener("toggle", () => { if ($("#chHist").open) renderChamberHistory(); });
+
 if (chamberCfg().url) connectChamber();
 $("#exportBtn").addEventListener("click", exportData);
 $("#importBtn").addEventListener("click", () => $("#importFile").click());
@@ -1484,4 +1781,9 @@ pullFromServer();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if ((localStorage.getItem(THEME) || "auto") === "auto") applyTheme("auto");
 });
+
+// Register the service worker so the app installs & runs fully offline at the fridge.
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
 </script>
