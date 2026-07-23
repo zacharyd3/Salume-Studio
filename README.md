@@ -159,6 +159,15 @@ the MQTT integration is connected to the broker, HA auto-creates the
 availability from the `status` last-will) — no YAML needed. Add a `history-graph`
 card with those two entities for temp/humidity history and long-term trends.
 
+**Phone alerts when you're not at the app.** The web app's in-panel banner only
+helps if a browser tab is open and visible, and its browser-notification option
+can't fire over plain-HTTP LAN (that needs HTTPS). Home Assistant fills the gap:
+drop in the ready-made package at
+[`home-assistant/charcuterie_alerts.yaml`](home-assistant/charcuterie_alerts.yaml)
+to push a companion-app notification when temp/humidity leaves your target range
+or the sensor drops offline — tunable from HA Helpers, no browser required. See
+[`home-assistant/README.md`](home-assistant/README.md) for setup.
+
 > **If HA never creates the entities** (but temp/humidity still show up in MQTT
 > Explorer), two silent-failure causes are far and away the most common:
 >
@@ -229,4 +238,5 @@ Dockerfile            # nginx:alpine serving the app
 docker-compose.yml    # one-command build/run + data volume
 nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy
 firmware/             # ESP8266 sketch for the DHT fridge sensor
+home-assistant/       # ready-to-paste HA package for phone alerts
 ```
