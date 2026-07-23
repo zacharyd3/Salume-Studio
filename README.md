@@ -81,7 +81,9 @@ const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='sa
 ## The fridge sensor (live chamber monitor)
 
 A NodeMCU V3 (ESP8266) with a DHT sensor lives on a wire in the curing fridge and
-publishes **retained** readings to a Mosquitto broker:
+publishes **retained** readings to a Mosquitto broker. The sketch lives in
+[`firmware/charcuterie_monitor/`](firmware/charcuterie_monitor/charcuterie_monitor.ino) —
+fill in your Wi-Fi/broker details at the top before flashing.
 
 | Topic                               | Value                       |
 | ----------------------------------- | --------------------------- |
@@ -135,6 +137,12 @@ the MQTT integration is connected to the broker, HA auto-creates the
 availability from the `status` last-will) — no YAML needed. Add a `history-graph`
 card with those two entities for temp/humidity history and long-term trends.
 
+> **If HA never creates the entities** (but temp/humidity still show up in MQTT
+> Explorer), it's almost always the PubSubClient buffer. Its default packet size
+> is **256 bytes**, but each discovery payload is ~500 bytes, so those publishes
+> fail silently while the tiny reading payloads go through. The sketch calls
+> `client.setBufferSize(512)` in `setup()` to fix this — don't remove it.
+
 > **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
 > ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
 > A DHT22/AM2302 or SHT31 is worth the swap before trusting the numbers.
@@ -147,4 +155,5 @@ icon.png              # favicon + unraid Docker icon
 Dockerfile            # nginx:alpine serving the app
 docker-compose.yml    # one-command build/run + data volume
 nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy
+firmware/             # ESP8266 sketch for the DHT fridge sensor
 ```
