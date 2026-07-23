@@ -166,6 +166,24 @@ The default NodeMCU flash layout (**4MB, FS:2MB, OTA:~1019KB**) leaves plenty of
 room; if the IDE complains there isn't enough space, pick a layout with a smaller
 filesystem under **Tools → Flash Size**.
 
+### Watching the logs over Wi-Fi (telnet)
+
+The Arduino **Serial Monitor only works over USB** — pick the network port and it
+just says "No monitor available for the port protocol network." So the sketch also
+runs a **telnet console on port 23** that mirrors everything it prints. Once the
+board is on Wi-Fi:
+
+```bash
+telnet <board-ip> 23        # or: telnet charcuterie-monitor.local 23
+```
+
+On Windows the built-in telnet client is off by default — enable it (*Turn Windows
+features on or off → Telnet Client*) or just use **PuTTY** in **Raw** mode on port
+23. You'll see the same `Temperature: … / Humidity: … / Published MQTT data.` lines
+every 15 s, so you can confirm it's alive without plugging anything in. It's
+output-only (one client at a time) and stays responsive even while the broker is
+down.
+
 > **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
 > ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
 > A DHT22/AM2302 or SHT31 is worth the swap before trusting the numbers.
