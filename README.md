@@ -145,6 +145,27 @@ card with those two entities for temp/humidity history and long-term trends.
 > The sketch calls `client.setBufferSize(1024)` in `setup()` to fix this — don't
 > shrink it below ~600.
 
+### Updating the firmware over Wi-Fi (OTA)
+
+So you don't have to pull the board off the fridge every time, the sketch enables
+**over-the-air (OTA) updates** via the `ArduinoOTA` library (bundled with the
+ESP8266 core — nothing to install).
+
+1. **Flash once over USB** with this firmware. Set `ota_hostname` and, importantly,
+   an `ota_password` in the `EDIT THESE` block first.
+2. After it boots and joins Wi-Fi, the board advertises itself over mDNS. In the
+   Arduino IDE, **Tools → Port** now lists a **Network port** named
+   `charcuterie-monitor` (your `ota_hostname`).
+3. Select that port and upload as usual — it goes over Wi-Fi and asks for the OTA
+   password. The board publishes `offline`, applies the update, and reboots.
+
+Every later change is a wireless upload; USB is only needed for the very first
+flash (or if OTA ever gets bricked). OTA stays responsive even while the MQTT
+broker is unreachable, so a bad broker can't lock you out of pushing new firmware.
+The default NodeMCU flash layout (**4MB, FS:2MB, OTA:~1019KB**) leaves plenty of
+room; if the IDE complains there isn't enough space, pick a layout with a smaller
+filesystem under **Tools → Flash Size**.
+
 > **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
 > ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
 > A DHT22/AM2302 or SHT31 is worth the swap before trusting the numbers.

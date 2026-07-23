@@ -6,9 +6,14 @@
  * plus a Last-Will "offline" on charcuterie/monitor/status drive availability
  * in both Home Assistant and the Curing Chamber panel in charcuterie.html.
  *
- * Libraries (Arduino Library Manager):
+ * Supports over-the-air (OTA) updates: after the first USB flash, the board
+ * appears as a network port in the Arduino IDE and every later upload goes
+ * over Wi-Fi — no need to unplug it from the fridge. See setupOTA().
+ *
+ * Libraries:
  *   - "DHT sensor library" by Adafruit (+ "Adafruit Unified Sensor")
  *   - "PubSubClient" by Nick O'Leary
+ *   - ArduinoOTA + ESP8266mDNS (both bundled with the ESP8266 core — no install)
  *
  * IMPORTANT: PubSubClient's default packet buffer is 256 bytes, but the Home
  * Assistant discovery payloads below are ~500 bytes. Without setBufferSize()
@@ -19,6 +24,8 @@
 
 #include <DHT.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <ArduinoOTA.h>
 #include <PubSubClient.h>
 
 // ============================ EDIT THESE =============================
@@ -29,13 +36,19 @@ const char* password    = "YOUR_WIFI_PASSWORD";
 const char* mqtt_server = "192.168.250.3";
 const char* mqtt_user   = "mqtt_user";
 const char* mqtt_password = "mqtt_password";
+
+// OTA (over-the-air updates). The board shows up under Tools > Port as a
+// "Network port" named ota_hostname. Set an OTA password so only you can push
+// firmware to it; leave it "" to allow unauthenticated updates on your LAN.
+const char* ota_hostname = "charcuterie-monitor";
+const char* ota_password = "CHANGE_ME_OTA_PASSWORD";
 // ====================================================================
 
 // How often to read the sensor and publish. Readings are retained, so the
 // last value is always available instantly to anyone who connects; this just
 // controls how fresh the "live" number is. Curing chambers move slowly, so
 // there's no need to hammer it.
-const unsigned long PUBLISH_INTERVAL_MS = 30000;   // 30 seconds
+const unsigned long PUBLISH_INTERVAL_MS = 15000;   // 15 seconds
 
 // PubSubClient's buffer must hold the WHOLE packet, not just the payload:
 // a discovery payload (~500 B) + its config topic (~59 B) + MQTT header (~7 B)
@@ -145,9 +158,43 @@ void reconnectMQTT() {
       Serial.print("failed, rc=");
       Serial.println(client.state());
 
-      delay(5000);
+      // Wait ~5s before retrying, but keep servicing OTA so you can still push
+      // new firmware over Wi-Fi even when the broker is unreachable.
+      for (int i = 0; i < 50 && !client.connected(); i++) {
+        ArduinoOTA.handle();
+        delay(100);
+      }
     }
   }
+}
+
+void setupOTA() {
+
+  ArduinoOTA.setHostname(ota_hostname);
+  if (strlen(ota_password) > 0) {
+    ArduinoOTA.setPassword(ota_password);
+  }
+
+  ArduinoOTA.onStart([]() {
+    // Announce a clean shutdown so HA and the chamber panel don't flag an error.
+    if (client.connected()) client.publish(TOPIC_STATUS, "offline", true);
+    Serial.println("OTA update starting...");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nOTA update complete — rebooting.");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("OTA progress: %u%%\r", (progress * 100) / total);
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("OTA error [%u]\n", error);
+  });
+
+  ArduinoOTA.begin();
+
+  Serial.print("OTA ready — network port \"");
+  Serial.print(ota_hostname);
+  Serial.println("\" available in the Arduino IDE.");
 }
 
 void setup() {
@@ -177,6 +224,8 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  setupOTA();
+
   dht.begin();
 
   delay(1000);
@@ -189,6 +238,8 @@ void setup() {
 }
 
 void loop() {
+
+  ArduinoOTA.handle();   // check for an incoming Wi-Fi firmware upload every loop
 
   if (!client.connected()) {
     reconnectMQTT();
