@@ -10,6 +10,11 @@
  * appears as a network port in the Arduino IDE and every later upload goes
  * over Wi-Fi — no need to unplug it from the fridge. See setupOTA().
  *
+ * Console over Wi-Fi: the serial monitor only works over USB, so the sketch
+ * also mirrors everything it logs to a telnet server on port 23. Watch it with
+ *   telnet <board-ip> 23      (or PuTTY in "Raw" mode, port 23)
+ * See handleTelnet() / the Log tee below.
+ *
  * Libraries:
  *   - "DHT sensor library" by Adafruit (+ "Adafruit Unified Sensor")
  *   - "PubSubClient" by Nick O'Leary
@@ -68,6 +73,41 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 DHT dht(DHTPIN, DHTTYPE);
 
+// --- Remote console over telnet (port 23) ---------------------------
+// Serial output only reaches a USB cable, so mirror every log line to a telnet
+// client too. Connect with `telnet <board-ip> 23` to watch it over Wi-Fi.
+WiFiServer telnetServer(23);
+WiFiClient telnetClient;
+
+// A Print that "tees" output to both USB serial and the telnet client, so the
+// same Log.print(...) calls show up in either place (or both at once).
+class TeeLogger : public Print {
+  public:
+    size_t write(uint8_t c) override {
+      Serial.write(c);
+      if (telnetClient && telnetClient.connected()) telnetClient.write(c);
+      return 1;
+    }
+    size_t write(const uint8_t* buf, size_t size) override {
+      Serial.write(buf, size);
+      if (telnetClient && telnetClient.connected()) telnetClient.write(buf, size);
+      return size;
+    }
+};
+TeeLogger Log;
+
+void handleTelnet() {
+  if (telnetServer.hasClient()) {
+    // Only one console at a time — drop any stale client for the newcomer.
+    if (telnetClient && telnetClient.connected()) telnetClient.stop();
+    telnetClient = telnetServer.accept();
+    telnetClient.println();
+    telnetClient.println("== Charcuterie Sensor — live log ==");
+  }
+  // Discard anything the client types; this is an output-only console.
+  while (telnetClient && telnetClient.available()) telnetClient.read();
+}
+
 void publishDiscovery() {
 
   const char* tempConfigTopic = "homeassistant/sensor/charcuterie_monitor/temperature/config";
@@ -117,14 +157,14 @@ void publishDiscovery() {
   bool okHum  = client.publish(humConfigTopic, humConfig, true);
 
   if (okTemp && okHum) {
-    Serial.println("Published Home Assistant discovery.");
+    Log.println("Published Home Assistant discovery.");
   } else {
     // If this ever prints, the packet buffer is too small for the payload.
-    Serial.print("Discovery publish FAILED (temp=");
-    Serial.print(okTemp);
-    Serial.print(", hum=");
-    Serial.print(okHum);
-    Serial.println("). Increase MQTT_BUFFER_SIZE.");
+    Log.print("Discovery publish FAILED (temp=");
+    Log.print(okTemp);
+    Log.print(", hum=");
+    Log.print(okHum);
+    Log.println("). Increase MQTT_BUFFER_SIZE.");
   }
 }
 
@@ -132,7 +172,7 @@ void reconnectMQTT() {
 
   while (!client.connected()) {
 
-    Serial.print("Connecting to MQTT...");
+    Log.print("Connecting to MQTT...");
 
     String clientId = "charcuterie-sensor-";
     clientId += String(random(0xffff), HEX);
@@ -146,7 +186,7 @@ void reconnectMQTT() {
           true,           // Last-Will retained
           "offline")) {   // Last-Will payload
 
-      Serial.println("connected!");
+      Log.println("connected!");
 
       // Retained "online" so availability is known the instant anyone connects.
       client.publish(TOPIC_STATUS, "online", true);
@@ -155,13 +195,14 @@ void reconnectMQTT() {
 
     } else {
 
-      Serial.print("failed, rc=");
-      Serial.println(client.state());
+      Log.print("failed, rc=");
+      Log.println(client.state());
 
-      // Wait ~5s before retrying, but keep servicing OTA so you can still push
-      // new firmware over Wi-Fi even when the broker is unreachable.
+      // Wait ~5s before retrying, but keep OTA and the telnet console responsive
+      // so a down broker can't lock you out of firmware pushes or the logs.
       for (int i = 0; i < 50 && !client.connected(); i++) {
         ArduinoOTA.handle();
+        handleTelnet();
         delay(100);
       }
     }
@@ -178,23 +219,23 @@ void setupOTA() {
   ArduinoOTA.onStart([]() {
     // Announce a clean shutdown so HA and the chamber panel don't flag an error.
     if (client.connected()) client.publish(TOPIC_STATUS, "offline", true);
-    Serial.println("OTA update starting...");
+    Log.println("OTA update starting...");
   });
   ArduinoOTA.onEnd([]() {
-    Serial.println("\nOTA update complete — rebooting.");
+    Log.println("\nOTA update complete — rebooting.");
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("OTA progress: %u%%\r", (progress * 100) / total);
+    Log.printf("OTA progress: %u%%\r", (progress * 100) / total);
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("OTA error [%u]\n", error);
+    Log.printf("OTA error [%u]\n", error);
   });
 
   ArduinoOTA.begin();
 
-  Serial.print("OTA ready — network port \"");
-  Serial.print(ota_hostname);
-  Serial.println("\" available in the Arduino IDE.");
+  Log.print("OTA ready — network port \"");
+  Log.print(ota_hostname);
+  Log.println("\" available in the Arduino IDE.");
 }
 
 void setup() {
@@ -226,20 +267,29 @@ void setup() {
 
   setupOTA();
 
+  // Start the telnet console. mDNS is already running (ArduinoOTA.begin), so
+  // the board is reachable as ota_hostname.local too.
+  telnetServer.begin();
+  telnetServer.setNoDelay(true);
+  Serial.print("Telnet console ready — connect with: telnet ");
+  Serial.print(WiFi.localIP());
+  Serial.println(" 23");
+
   dht.begin();
 
   delay(1000);
 
-  Serial.println();
-  Serial.println("==============================");
-  Serial.println("  Charcuterie Sensor Online");
-  Serial.println("==============================");
-  Serial.println();
+  Log.println();
+  Log.println("==============================");
+  Log.println("  Charcuterie Sensor Online");
+  Log.println("==============================");
+  Log.println();
 }
 
 void loop() {
 
   ArduinoOTA.handle();   // check for an incoming Wi-Fi firmware upload every loop
+  handleTelnet();        // accept/service the telnet console
 
   if (!client.connected()) {
     reconnectMQTT();
@@ -257,17 +307,17 @@ void loop() {
     float temperature = dht.readTemperature();
 
     if (isnan(humidity) || isnan(temperature)) {
-      Serial.println("Sensor failed");
+      Log.println("Sensor failed");
       return;
     }
 
-    Serial.print("Temperature: ");
-    Serial.print(temperature);
-    Serial.println(" °C");
+    Log.print("Temperature: ");
+    Log.print(temperature);
+    Log.println(" °C");
 
-    Serial.print("Humidity: ");
-    Serial.print(humidity);
-    Serial.println(" %");
+    Log.print("Humidity: ");
+    Log.print(humidity);
+    Log.println(" %");
 
     char tempString[8];
     dtostrf(temperature, 1, 2, tempString);
@@ -278,7 +328,7 @@ void loop() {
     client.publish(TOPIC_TEMPERATURE, tempString, true);
     client.publish(TOPIC_HUMIDITY, humString, true);
 
-    Serial.println("Published MQTT data.");
-    Serial.println();
+    Log.println("Published MQTT data.");
+    Log.println();
   }
 }
