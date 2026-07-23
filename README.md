@@ -118,6 +118,22 @@ humidity leaves its target range (or the sensor drops offline) you get a browser
 notification and an in-panel banner, re-nudged every 30 minutes while the problem
 persists, and an all-clear when it recovers. Notifications need permission and a
 secure context (HTTPS or `localhost`); over plain-HTTP LAN the banner still shows.
+
+**Phone alerts, configured in the app.** In the chamber ⚙️ settings there's a
+**Home Assistant notify** section: tick *Send alerts via a Home Assistant notify
+service*, enter your **HA Base URL**, a **long-lived access token** (HA → Profile
+→ Security), and a **notify service** (hit **⟳ Load** to pull the list from HA, or
+type `notify` to hit every device), then **Test**. When the chamber goes out of
+range the app pushes to that service — no YAML to edit. Because the app has no
+backend, these fire **while the app is open** in a browser or installed PWA; for
+round-the-clock alerts, also use the Home Assistant package below.
+
+> The browser calls HA's REST API directly, so it needs to reach HA cross-origin.
+> Two ways: add your app's origin to `http.cors_allowed_origins` in HA's config,
+> **or** — with no HA-side change — proxy HA through this server (uncomment the
+> `/ha/` block in [`nginx/default.conf`](nginx/default.conf) and set the app's
+> *HA Base URL* to `/ha`). The token is stored only in your browser's
+> `localStorage`.
 Expand **📈 Condition history** to see temp and humidity plotted over the last few
 days with the target band shaded — handy for tracing a bad batch back to a
 humidity swing. History is sampled every 5 minutes and kept in the browser
