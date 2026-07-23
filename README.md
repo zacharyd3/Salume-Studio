@@ -10,9 +10,12 @@ phone or tablet by the fridge.
 
 It ships with a **library of 16 pre-built recipes** (grouped by pork / beef /
 game / lamb / poultry / salami), each with suggested ingredients and step-by-step
-instructions. Once a batch is curing, the tracker projects an **estimated finish
-date** from its recent drying rate, nudges you when a **weigh-in is overdue**, and
-flags a batch that's **drying too fast** (case-hardening risk). The curing-chamber
+instructions. Each batch runs through **two stages**: a time-tracked **cure**
+(no weighing — it counts the days and tells you when to rinse & hang), then
+**drying**, where you capture the **hang weight** (what the loss % is measured
+from) and log weigh-ins. In the drying stage the tracker projects an **estimated
+finish date** from the recent drying rate, nudges you when a **weigh-in is
+overdue**, and flags a batch that's **drying too fast** (case-hardening risk). The curing-chamber
 panel can **alert you** when temperature or humidity drifts out of range and keeps
 a **condition-history chart** so you can spot a spike after the fact. Served over
 HTTPS (or `localhost`) it's an **installable PWA** that works fully offline.
@@ -59,6 +62,13 @@ clears and is shared across every device that opens the app.
   `PUT`). The little pill at the top of **My Curing** shows the sync state
   (`Synced ✓`, `Saving…`, or `Local only` when opened as a bare file) — **tap
   it to sync now**.
+
+A new batch starts in the **cure** stage: the card counts the days toward the
+recipe's cure length (editable) and flips to **✅ Ready to hang** when the window
+is reached — which also pushes a notification through the same browser/Home
+Assistant channels as the chamber alerts. Tap **🌬️ Start drying**, weigh the
+piece, and it switches to weight tracking from that hang weight. (**↩ Back to
+curing** reverts if you jump the gun.)
 
 Any weigh-in can be corrected after the fact: in a batch's **Weigh-in history**,
 tap a **date** or a **weight** to edit it, or **✕** to delete it. Editing the

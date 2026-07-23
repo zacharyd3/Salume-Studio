@@ -434,6 +434,12 @@
     .ha-status{font-size:12px;font-weight:600;margin-bottom:10px;color:var(--muted,#8a8a8a)}
     .ha-status[data-state="on"]{color:#3a9d4b}
 
+    /* Cure-stage note + editable inline links outside the log list */
+    .cure-note{font-size:12px;color:var(--ink-soft,#8a8a8a);margin-top:10px;line-height:1.45}
+    .loglink{border:0;background:none;color:var(--ink);cursor:pointer;font:inherit;font-size:12px;
+      padding:0;border-bottom:1px dotted var(--ink-soft,#8a8a8a)}
+    .loglink:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
     /* Per-batch notes */
     .notes-lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.04em;
       color:var(--ink-soft,#8a8a8a);margin:10px 0 4px}
@@ -1164,22 +1170,39 @@ function importData(file) {
   reader.readAsText(file);
 }
 
+/* Best-effort day range from a recipe's cureDays string ("10–14 days",
+   "24–48 hours", "7 days per inch…"). Falls back to a sensible default. */
+function parseCureDays(str) {
+  if (!str) return { min: 10, max: 14 };
+  const hours = /hour/i.test(str);
+  const nums = (str.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  if (!nums.length) return { min: 10, max: 14 };
+  let min = nums[0], max = nums.length > 1 ? nums[1] : nums[0];
+  if (hours) { min = Math.max(1, Math.round(min / 24)); max = Math.max(1, Math.round(max / 24)); }
+  if (max < min) max = min;
+  return { min: Math.round(min), max: Math.round(max) };
+}
+
 function saveRecipe(R) {
   const list = loadAll();
   const defName = R.ingredients.some(i => i.key === "garlic") ? `${R.name}` : R.name;
+  const cd = parseCureDays(R.cureDays);
   const entry = {
     id: uid(), name: defName, meat: R.meat, emoji: R.emoji,
+    phase: "cure",                                 // batches start in the cure (time-tracked) stage
+    greenWeight: Math.round(R.startWeight),        // raw weight the cure amounts were figured from
     startWeight: Math.round(R.startWeight), target: R.target,
-    targetWeight: Math.round(R.targetWeight),
-    startDate: todayISO(),
+    targetWeight: Math.round(R.targetWeight),      // provisional; re-derived from hang weight at drying
+    startDate: todayISO(), cureStart: todayISO(),
+    cureTargetDays: cd.min, cureMinDays: cd.min, cureMaxDays: cd.max,
     ingredients: R.ingredients.map(i => ({ label: i.label, grams: +i.grams.toFixed(1), stage: i.stage })),
     steps: R.steps.map(s => s.replace("{CUREDAYS}", R.cureDays).replace("{TARGET}", R.target).replace("{TARGETW}", fmtG(R.targetWeight))),
     cureDays: R.cureDays,
-    logs: [{ date: todayISO(), weight: Math.round(R.startWeight) }],
+    logs: [],                                      // no weigh-ins until it's hung to dry
   };
   list.unshift(entry);
   saveAll(list);
-  toast("Saved — now tracking 🥩");
+  toast("Saved — now curing 🧂");
   selectTab("track");
 }
 
@@ -1189,13 +1212,14 @@ function renderTracker() {
   if (!list.length) {
     box.innerHTML = `<div class="card empty">
         <div class="big">🍖</div>
-        <p><b>Nothing curing yet.</b><br>Build a recipe in the Calculator and hit <b>Save &amp; Track</b> to log its drying journey here.</p>
+        <p><b>Nothing curing yet.</b><br>Build a recipe in the Calculator and hit <b>Save &amp; Track</b> to follow it from cure to dry here.</p>
         <button class="btn sm ghost" onclick="document.getElementById('tab-calc').click()">Go to Calculator</button>
       </div>`;
     return;
   }
   box.innerHTML = list.map(cardHTML).join("");
   list.forEach(wireCard);
+  checkCureCompletions();
 }
 
 /* Drying rate over a recent window (default 14 days), in grams/day.
@@ -1229,9 +1253,66 @@ function estimateReady(e) {
 }
 
 function cardHTML(e) {
+  return (e.phase || "dry") === "cure" ? cureCardHTML(e) : dryCardHTML(e);
+}
+
+/* Cure stage — time-tracked, no weigh-ins. Tells you when to rinse & hang. */
+function cureCardHTML(e) {
+  const now = new Date();
+  const start = new Date((e.cureStart || e.startDate) + "T00:00:00");
+  const days = daysBetween(start, now);
+  const target = e.cureTargetDays || e.cureMinDays || 10;
+  const ready = days >= target;
+  const progPct = Math.min(100, Math.max(0, target > 0 ? days / target * 100 : 0));
+  const until = new Date(start); until.setDate(until.getDate() + target);
+  const untilISO = until.toISOString().slice(0, 10);
+  const notesVal = (e.notes || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  return `<div class="card" data-id="${e.id}">
+    <div class="track-head">
+      <div style="flex:1">
+        <div class="nm">${e.emoji} <span class="ename" data-id="${e.id}">${e.name}</span></div>
+        <div class="meta">🧂 Curing · started ${fmtDate(e.cureStart || e.startDate)} · day ${days}</div>
+      </div>
+      <span class="pill ${ready ? "good" : ""}">${ready ? "✅ Ready to hang" : "🧂 Curing"}</span>
+    </div>
+
+    <div class="progress ${ready ? "done" : ""}"><span style="width:${progPct}%"></span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-soft)">
+      <span>day ${days} of ~${target}</span>
+      <button class="loglink" data-role="editcure" data-id="${e.id}">edit cure length</button>
+    </div>
+
+    <div class="est-row">${ready
+      ? `<span class="est ready">✅ Cure window reached — rinse, pat dry &amp; hang</span>`
+      : `<span class="est">🧂 Cure until ~<b>${fmtDate(untilISO)}</b>${e.cureDays ? ` · recommended ${e.cureDays}` : ""}</span>`}</div>
+
+    <div class="cure-note">Weight isn't tracked during the cure — this stage is about time. When you hang it, tap <b>Start drying</b> and weigh it: that hang weight is what the drying % is measured from.</div>
+
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn good" data-role="startdry" data-id="${e.id}">🌬️ Start drying →</button>
+    </div>
+
+    <details class="log">
+      <summary>Notes · actions</summary>
+      <label class="notes-lbl" for="notes-${e.id}">📝 Notes</label>
+      <textarea class="notes" id="notes-${e.id}" data-role="notes" data-id="${e.id}"
+        placeholder="Observations — flipped the bag, extra salt on the thick end…">${notesVal}</textarea>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print recipe</button>
+        <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* Drying stage — weight-loss tracking to the target %. */
+function dryCardHTML(e) {
   const now = new Date();
   const start = new Date(e.startDate + "T00:00:00");
   const days = daysBetween(start, now);
+  const curedDays = e.cureStart && e.cureStart !== e.startDate
+    ? daysBetween(new Date(e.cureStart + "T00:00:00"), start) : null;
   const cur = e.logs[e.logs.length - 1].weight;
   const totalNeed = e.startWeight - e.targetWeight;
   const lost = e.startWeight - cur;
@@ -1263,7 +1344,7 @@ function cardHTML(e) {
     <div class="track-head">
       <div style="flex:1">
         <div class="nm">${e.emoji} <span class="ename" data-id="${e.id}">${e.name}</span></div>
-        <div class="meta">Started ${fmtDate(e.startDate)} · day ${days} · ${e.cureDays ? "cure " + e.cureDays : ""}</div>
+        <div class="meta">🌬️ ${curedDays != null ? `Cured ${curedDays}d · drying` : "Drying"} · started ${fmtDate(e.startDate)} · day ${days}</div>
       </div>
       <span class="pill ${done ? "good" : ""}">${done ? "✓ Ready!" : lossPct.toFixed(0) + "% dried"}</span>
     </div>
@@ -1307,6 +1388,7 @@ function cardHTML(e) {
       <div class="log-hint">Tap a date or weight to correct it.</div>
       <div class="btn-row" style="margin-top:12px">
         <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print recipe</button>
+        <button class="btn sm ghost" data-role="tocure" data-id="${e.id}">↩ Back to curing</button>
         <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
       </div>
     </details>
@@ -1350,22 +1432,20 @@ function chartSVG(e) {
 function wireCard(e) {
   const root = $(`.card[data-id="${e.id}"]`);
   if (!root) return;
-  const logInput = $(`input[data-role="wi"][data-id="${e.id}"]`, root);
-  const doLog = () => {
-    const v = parseFloat(logInput.value);
-    if (!v || v <= 0) { toast("Enter today's weight"); return; }
-    logWeight(e.id, Math.round(v));
-  };
-  $(`button[data-role="log"][data-id="${e.id}"]`, root).addEventListener("click", doLog);
-  logInput.addEventListener("keydown", ev => { if (ev.key === "Enter") doLog(); });
+  wireCommon(e, root);
+  if ((e.phase || "dry") === "cure") wireCure(e, root);
+  else wireDry(e, root);
+}
 
-  $(`button[data-role="del"][data-id="${e.id}"]`, root).addEventListener("click", () => {
+// Shared across both phases: rename, notes, print, delete.
+function wireCommon(e, root) {
+  const del = $(`button[data-role="del"][data-id="${e.id}"]`, root);
+  if (del) del.addEventListener("click", () => {
     if (confirm(`Delete "${e.name}"? This can't be undone.`)) {
       saveAll(loadAll().filter(x => x.id !== e.id)); renderTracker(); toast("Deleted");
     }
   });
-  // Notes — save quietly as you type (debounced), without re-rendering the
-  // card so the cursor and open <details> stay put.
+  // Notes — save quietly as you type (debounced), without re-rendering.
   const notesEl = $(`textarea[data-role="notes"][data-id="${e.id}"]`, root);
   if (notesEl) {
     let notesTimer = null;
@@ -1376,8 +1456,43 @@ function wireCard(e) {
     notesEl.addEventListener("input", () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotes, 500); });
     notesEl.addEventListener("blur", () => { clearTimeout(notesTimer); saveNotes(); });
   }
+  const print = $(`button[data-role="print"][data-id="${e.id}"]`, root);
+  if (print) print.addEventListener("click", () => printSaved(e));
+  // Rename by clicking the name
+  const nameEl = $(`.ename[data-id="${e.id}"]`, root);
+  if (nameEl) {
+    nameEl.style.cursor = "text"; nameEl.title = "Click to rename";
+    nameEl.addEventListener("click", () => {
+      const nn = prompt("Recipe name:", e.name);
+      if (nn && nn.trim()) {
+        const list = loadAll(); const item = list.find(x => x.id === e.id);
+        if (item) { item.name = nn.trim(); saveAll(list); renderTracker(); }
+      }
+    });
+  }
+}
 
-  $(`button[data-role="print"][data-id="${e.id}"]`, root).addEventListener("click", () => printSaved(e));
+// Cure stage: start-drying transition and cure-length editing.
+function wireCure(e, root) {
+  const sd = $(`button[data-role="startdry"][data-id="${e.id}"]`, root);
+  if (sd) sd.addEventListener("click", () => startDrying(e.id));
+  const ec = $(`button[data-role="editcure"][data-id="${e.id}"]`, root);
+  if (ec) ec.addEventListener("click", () => editCureLength(e.id));
+}
+
+// Dry stage: weigh-in logging, log editing, and reverting to curing.
+function wireDry(e, root) {
+  const logInput = $(`input[data-role="wi"][data-id="${e.id}"]`, root);
+  const logBtn = $(`button[data-role="log"][data-id="${e.id}"]`, root);
+  if (logInput && logBtn) {
+    const doLog = () => {
+      const v = parseFloat(logInput.value);
+      if (!v || v <= 0) { toast("Enter today's weight"); return; }
+      logWeight(e.id, Math.round(v));
+    };
+    logBtn.addEventListener("click", doLog);
+    logInput.addEventListener("keydown", ev => { if (ev.key === "Enter") doLog(); });
+  }
   $$(`button[data-role="dellog"][data-id="${e.id}"]`, root).forEach(b => b.addEventListener("click", () => {
     const idx = +b.dataset.idx;
     const list = loadAll(); const item = list.find(x => x.id === e.id);
@@ -1388,16 +1503,65 @@ function wireCard(e) {
     b.addEventListener("click", () => editLogWeight(e.id, +b.dataset.idx)));
   $$(`button[data-role="editdate"][data-id="${e.id}"]`, root).forEach(b =>
     b.addEventListener("click", () => editLogDate(e.id, +b.dataset.idx)));
-  // Rename by clicking the name
-  const nameEl = $(`.ename[data-id="${e.id}"]`, root);
-  nameEl.style.cursor = "text"; nameEl.title = "Click to rename";
-  nameEl.addEventListener("click", () => {
-    const nn = prompt("Recipe name:", e.name);
-    if (nn && nn.trim()) {
-      const list = loadAll(); const item = list.find(x => x.id === e.id);
-      if (item) { item.name = nn.trim(); saveAll(list); renderTracker(); }
+  const tc = $(`button[data-role="tocure"][data-id="${e.id}"]`, root);
+  if (tc) tc.addEventListener("click", () => backToCuring(e.id));
+}
+
+/* Move a batch from curing to drying: capture the hang weight (what the drying
+   % is measured from) and start the weigh-in log from there. */
+function startDrying(id) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e) return;
+  const raw = prompt("Hang weight now (g) — after curing, rinsed & patted dry.\nThe drying % is measured from this weight:", e.greenWeight || e.startWeight || "");
+  if (raw == null) return;
+  const w = Math.round(parseFloat(raw));
+  if (!w || w <= 0) { toast("Enter the hang weight"); return; }
+  e.phase = "dry";
+  e.startWeight = w;
+  e.targetWeight = Math.round(w * (1 - e.target / 100));
+  e.startDate = todayISO();
+  e.logs = [{ date: todayISO(), weight: w }];
+  e.cureNotified = true;
+  saveAll(list); renderTracker(); toast("Now drying — weigh it regularly 📉");
+}
+
+function editCureLength(id) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e) return;
+  const raw = prompt("Cure length in days (when to hang):", e.cureTargetDays || e.cureMinDays || 10);
+  if (raw == null) return;
+  const d = Math.round(parseFloat(raw));
+  if (!d || d <= 0) { toast("Enter a number of days"); return; }
+  e.cureTargetDays = d;
+  saveAll(list); renderTracker();
+}
+
+/* Revert a batch to the cure stage (e.g. hung too early, or a mis-tap). */
+function backToCuring(id) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e) return;
+  if (!confirm(`Move "${e.name}" back to curing? Its weigh-in history is kept but hidden until you start drying again.`)) return;
+  e.phase = "cure";
+  if (!e.cureStart) e.cureStart = e.startDate;
+  e.cureNotified = false;
+  saveAll(list); renderTracker(); toast("Back to curing 🧂");
+}
+
+/* When a batch reaches its cure length, nudge once through the same channels
+   as the chamber alerts. Runs on render and when the app regains focus. */
+function checkCureCompletions() {
+  const list = loadAll(); let changed = false; const now = new Date();
+  list.forEach(e => {
+    if ((e.phase || "dry") !== "cure") return;
+    const start = new Date((e.cureStart || e.startDate) + "T00:00:00");
+    const target = e.cureTargetDays || e.cureMinDays || 10;
+    if (daysBetween(start, now) >= target && !e.cureNotified) {
+      e.cureNotified = true; changed = true;
+      chNotify("Cure window reached", `${e.name}: time to rinse, dry & hang.`);
+      haNotify("🧂 Cure window reached", `${e.name}: time to rinse, dry & hang.`);
     }
   });
+  if (changed) saveAll(list);
 }
 
 function logWeight(id, weight) {
@@ -1966,8 +2130,8 @@ pullFromServer();
 // Cross-device freshness: re-pull the shared file when the app regains focus or
 // the tab becomes visible, so edits made on another device show up here without
 // a manual reload. Tapping the sync pill forces a sync now.
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshFromServerIfIdle(); });
-window.addEventListener("focus", refreshFromServerIfIdle);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshFromServerIfIdle(); checkCureCompletions(); } });
+window.addEventListener("focus", () => { refreshFromServerIfIdle(); checkCureCompletions(); });
 const syncPill = $("#syncStatus");
 if (syncPill && syncOn) {
   syncPill.style.cursor = "pointer";
