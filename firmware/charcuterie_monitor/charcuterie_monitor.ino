@@ -1,29 +1,33 @@
 /*
- * Salume Studio — Curing Chamber Monitor (NodeMCU V3 / ESP8266 + DHT)
+ * Salume Studio - Curing Chamber Monitor (NodeMCU V3 / ESP8266 + DHT)
  *
  * Publishes retained temperature/humidity to an MQTT broker and announces
  * itself to Home Assistant via MQTT discovery. A retained "online" message
  * plus a Last-Will "offline" on charcuterie/monitor/status drive availability
  * in both Home Assistant and the Curing Chamber panel in charcuterie.html.
  *
+ * The broker connection is anonymous (no username/password). If your broker
+ * requires auth, that user must also be allowed to publish under homeassistant/#
+ * or discovery will silently fail even though the readings still go through.
+ *
  * Supports over-the-air (OTA) updates: after the first USB flash, the board
  * appears as a network port in the Arduino IDE and every later upload goes
- * over Wi-Fi — no need to unplug it from the fridge. See setupOTA().
+ * over Wi-Fi - no need to unplug it from the fridge. See setupOTA().
  *
  * Console over Wi-Fi: the serial monitor only works over USB, so the sketch
  * also mirrors everything it logs to a telnet server on port 23. Watch it with
  *   telnet <board-ip> 23      (or PuTTY in "Raw" mode, port 23)
- * See handleTelnet() / the Log tee below.
+ * Console output is plain ASCII so it renders in any terminal. See handleTelnet().
  *
  * Libraries:
  *   - "DHT sensor library" by Adafruit (+ "Adafruit Unified Sensor")
  *   - "PubSubClient" by Nick O'Leary
- *   - ArduinoOTA + ESP8266mDNS (both bundled with the ESP8266 core — no install)
+ *   - ArduinoOTA + ESP8266mDNS (both bundled with the ESP8266 core - no install)
  *
  * IMPORTANT: PubSubClient's default packet buffer is 256 bytes, but the Home
  * Assistant discovery payloads below are ~500 bytes. Without setBufferSize()
  * the discovery publishes silently fail (publish() returns false) and HA never
- * creates the entities — even though the small temperature/humidity payloads
+ * creates the entities - even though the small temperature/humidity payloads
  * still publish fine. See setup().
  */
 
@@ -34,13 +38,11 @@
 #include <PubSubClient.h>
 
 // ============================ EDIT THESE =============================
-// Your Wi-Fi and broker details. Keep real credentials out of git — these
+// Your Wi-Fi and broker details. Keep real credentials out of git - these
 // are placeholders; fill them in on the copy you flash.
 const char* ssid        = "YOUR_WIFI_SSID";
 const char* password    = "YOUR_WIFI_PASSWORD";
 const char* mqtt_server = "192.168.250.3";
-const char* mqtt_user   = "mqtt_user";
-const char* mqtt_password = "mqtt_password";
 
 // OTA (over-the-air updates). The board shows up under Tools > Port as a
 // "Network port" named ota_hostname. Set an OTA password so only you can push
@@ -54,6 +56,10 @@ const char* ota_password = "CHANGE_ME_OTA_PASSWORD";
 // controls how fresh the "live" number is. Curing chambers move slowly, so
 // there's no need to hammer it.
 const unsigned long PUBLISH_INTERVAL_MS = 15000;   // 15 seconds
+
+// Re-announce discovery + "online" this often so Home Assistant re-creates the
+// entities on its own after a broker restart or a cleared retained message.
+const unsigned long REANNOUNCE_INTERVAL_MS = 300000;   // 5 minutes
 
 // PubSubClient's buffer must hold the WHOLE packet, not just the payload:
 // a discovery payload (~500 B) + its config topic (~59 B) + MQTT header (~7 B)
@@ -98,17 +104,20 @@ TeeLogger Log;
 
 void handleTelnet() {
   if (telnetServer.hasClient()) {
-    // Only one console at a time — drop any stale client for the newcomer.
+    // Only one console at a time - drop any stale client for the newcomer.
     if (telnetClient && telnetClient.connected()) telnetClient.stop();
     telnetClient = telnetServer.accept();
     telnetClient.println();
-    telnetClient.println("== Charcuterie Sensor — live log ==");
+    telnetClient.println("== Charcuterie Sensor - live log ==");
   }
   // Discard anything the client types; this is an output-only console.
   while (telnetClient && telnetClient.available()) telnetClient.read();
 }
 
-void publishDiscovery() {
+// Publish availability + the Home Assistant discovery configs (all retained).
+void announce() {
+
+  client.publish(TOPIC_STATUS, "online", true);
 
   const char* tempConfigTopic = "homeassistant/sensor/charcuterie_monitor/temperature/config";
   const char* humConfigTopic  = "homeassistant/sensor/charcuterie_monitor/humidity/config";
@@ -159,12 +168,13 @@ void publishDiscovery() {
   if (okTemp && okHum) {
     Log.println("Published Home Assistant discovery.");
   } else {
-    // If this ever prints, the packet buffer is too small for the payload.
+    // If this ever prints, either the packet buffer is too small for the payload
+    // or the broker rejected the publish (e.g. an ACL that blocks homeassistant/#).
     Log.print("Discovery publish FAILED (temp=");
     Log.print(okTemp);
     Log.print(", hum=");
     Log.print(okHum);
-    Log.println("). Increase MQTT_BUFFER_SIZE.");
+    Log.println("). Check MQTT_BUFFER_SIZE and broker permissions.");
   }
 }
 
@@ -177,10 +187,10 @@ void reconnectMQTT() {
     String clientId = "charcuterie-sensor-";
     clientId += String(random(0xffff), HEX);
 
+    // Anonymous connect with a retained Last-Will so availability flips to
+    // "offline" if the board drops off unexpectedly.
     if (client.connect(
           clientId.c_str(),
-          mqtt_user,
-          mqtt_password,
           TOPIC_STATUS,   // Last-Will topic
           1,              // Last-Will QoS
           true,           // Last-Will retained
@@ -188,10 +198,7 @@ void reconnectMQTT() {
 
       Log.println("connected!");
 
-      // Retained "online" so availability is known the instant anyone connects.
-      client.publish(TOPIC_STATUS, "online", true);
-
-      publishDiscovery();
+      announce();
 
     } else {
 
@@ -222,7 +229,7 @@ void setupOTA() {
     Log.println("OTA update starting...");
   });
   ArduinoOTA.onEnd([]() {
-    Log.println("\nOTA update complete — rebooting.");
+    Log.println("\nOTA update complete - rebooting.");
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Log.printf("OTA progress: %u%%\r", (progress * 100) / total);
@@ -233,7 +240,7 @@ void setupOTA() {
 
   ArduinoOTA.begin();
 
-  Log.print("OTA ready — network port \"");
+  Log.print("OTA ready - network port \"");
   Log.print(ota_hostname);
   Log.println("\" available in the Arduino IDE.");
 }
@@ -271,7 +278,7 @@ void setup() {
   // the board is reachable as ota_hostname.local too.
   telnetServer.begin();
   telnetServer.setNoDelay(true);
-  Serial.print("Telnet console ready — connect with: telnet ");
+  Serial.print("Telnet console ready - connect with: telnet ");
   Serial.print(WiFi.localIP());
   Serial.println(" 23");
 
@@ -297,6 +304,14 @@ void loop() {
 
   client.loop();   // keeps the MQTT connection alive (keepalive pings) at all times
 
+  // Periodically re-assert availability + discovery so Home Assistant recovers
+  // on its own after a broker restart or a cleared retained message.
+  static unsigned long lastAnnounce = millis();
+  if (client.connected() && millis() - lastAnnounce >= REANNOUNCE_INTERVAL_MS) {
+    lastAnnounce = millis();
+    announce();
+  }
+
   static unsigned long lastReading = 0;
 
   if (millis() - lastReading >= PUBLISH_INTERVAL_MS || lastReading == 0) {
@@ -313,7 +328,7 @@ void loop() {
 
     Log.print("Temperature: ");
     Log.print(temperature);
-    Log.println(" °C");
+    Log.println(" C");
 
     Log.print("Humidity: ");
     Log.print(humidity);
