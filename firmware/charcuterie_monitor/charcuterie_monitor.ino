@@ -37,8 +37,11 @@ const char* mqtt_password = "mqtt_password";
 // there's no need to hammer it.
 const unsigned long PUBLISH_INTERVAL_MS = 30000;   // 30 seconds
 
-// Discovery payloads are ~500 bytes; give PubSubClient room for them.
-const uint16_t MQTT_BUFFER_SIZE = 512;
+// PubSubClient's buffer must hold the WHOLE packet, not just the payload:
+// a discovery payload (~500 B) + its config topic (~59 B) + MQTT header (~7 B)
+// is ~570 B, so 512 is too small and the publish silently fails. 1024 leaves
+// comfortable headroom.
+const uint16_t MQTT_BUFFER_SIZE = 1024;
 
 #define DHTPIN  D4
 #define DHTTYPE DHT11
