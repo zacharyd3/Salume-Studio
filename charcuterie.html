@@ -329,8 +329,26 @@
             <input id="cfgHmax" type="number" step="any" inputmode="decimal" placeholder="humidity max %">
           </div>
         </div>
+        <div class="ha-sec">
+          <label class="chk" style="margin-bottom:6px"><input type="checkbox" id="cfgHaEnabled"><span class="nm">📲 Send alerts via a Home Assistant notify service</span></label>
+          <div class="note" style="margin:0 0 10px">Push a phone notification when temp/humidity leaves range or the sensor drops offline. Requires a long-lived access token from HA → Profile → Security → Long-Lived Access Tokens.</div>
+          <div class="ha-status" id="haStatus">Not configured</div>
+          <div class="field"><label class="lbl" for="cfgHaUrl">HA Base URL</label>
+            <input id="cfgHaUrl" placeholder="https://homeassistant.example.org (or /ha via the nginx proxy)" autocomplete="off"></div>
+          <div class="field"><label class="lbl" for="cfgHaToken">Long-Lived Access Token</label>
+            <input id="cfgHaToken" type="password" placeholder="Paste token (leave blank to keep existing)" autocomplete="new-password"></div>
+          <div class="field"><label class="lbl" for="cfgHaService">Notify Service</label>
+            <div class="row">
+              <input class="grow" id="cfgHaService" list="haServiceList" placeholder="notify  ·  or e.g. mobile_app_your_phone" autocomplete="off">
+              <datalist id="haServiceList"></datalist>
+              <button type="button" class="btn sm ghost" id="haLoadBtn" title="Load notify services from HA">⟳ Load</button>
+              <button type="button" class="btn sm ghost" id="haTestBtn" title="Send a test notification">Test</button>
+            </div>
+            <div class="note" style="margin-top:6px">Use <code>notify</code> for all devices, or pick a specific one. Click <b>⟳ Load</b> after entering your URL &amp; token.</div>
+          </div>
+        </div>
         <button class="btn good" id="cfgSave">Save &amp; Connect</button>
-        <div class="note" style="margin-top:8px">Defaults suit in-fridge drying (1–5 °C). Leave user/password blank for an anonymous broker. Everything stays in this browser (localStorage) and is sent only to your broker.</div>
+        <div class="note" style="margin-top:8px">Defaults suit in-fridge drying (1–5 °C). Leave user/password blank for an anonymous broker. Everything stays in this browser (localStorage) and is sent only to your broker &amp; your Home Assistant. Note: in-app alerts fire while this app is open — for always-on alerts use the Home Assistant package too.</div>
       </div>
     </div>
 
@@ -405,6 +423,12 @@
     .badge{font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:999px;border:1px solid transparent;line-height:1.3}
     .badge.warn{color:#a9740f;background:#c7921714;border-color:#c7921755}
     .badge.bad{color:var(--accent,#b23b3b);background:#b23b3b14;border-color:#b23b3b55}
+
+    /* Home Assistant notify section */
+    .ha-sec{margin-top:14px;padding-top:14px;border-top:1px solid var(--line,#8883)}
+    .ha-sec code{font-size:12px;background:var(--bg,#8881);padding:1px 5px;border-radius:5px}
+    .ha-status{font-size:12px;font-weight:600;margin-bottom:10px;color:var(--muted,#8a8a8a)}
+    .ha-status[data-state="on"]{color:#3a9d4b}
 
     /* Per-batch notes */
     .notes-lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.04em;
@@ -1425,6 +1449,7 @@ function printSaved(e) {
 const CHAMBER = "salume.chamber.v1";
 const CH_HIST = "salume.chamber.hist.v1";
 const CH_ALERTS = "salume.chamber.alerts.v1";
+const CH_HA = "salume.chamber.ha.v1";
 const CH_DEFAULTS = { tMin: 1, tMax: 5, hMin: 70, hMax: 85 };   // in-fridge drying
 const T_MARGIN = 2, H_MARGIN = 5;                                // amber band just outside target
 let mqtt = null, mqttRetry = null, chWatch = null, chConnAt = 0, lastLiveAt = 0, sensorOnline = null;
@@ -1650,11 +1675,78 @@ function evaluateAlerts() {
   const now = Date.now();
   if (issues.length && (sig !== alertPrev || now - alertNotifiedAt > ALERT_RENOTIFY_MS)) {
     chNotify("Curing chamber needs attention", issues.join("\n"));
+    haNotify("🌡️ Curing chamber needs attention", issues.join("\n"));
     alertNotifiedAt = now;
   } else if (!issues.length && alertPrev) {
     chNotify("Curing chamber back to normal ✓", "Temperature & humidity are within range again.");
+    haNotify("✅ Curing chamber back to normal", "Temperature & humidity are within range again.");
   }
   alertPrev = sig;
+}
+
+/* ---------- Home Assistant notify (via HA REST API) ---------- */
+function haCfg() { try { return JSON.parse(localStorage.getItem(CH_HA)) || {}; } catch { return {}; } }
+function haBase(url) { return (url || "").trim().replace(/\/+$/, ""); }
+
+function updateHaStatus() {
+  const el = $("#haStatus"); if (!el) return;
+  const c = haCfg();
+  if (c.enabled && c.url && c.service && c.token) {
+    el.dataset.state = "on";
+    el.textContent = `Enabled · ${c.url} · service: ${c.service} · token set`;
+  } else {
+    el.dataset.state = "off";
+    el.textContent = c.url || c.service ? "Saved but incomplete — needs URL, token & service, and Enable checked" : "Not configured";
+  }
+}
+
+async function haNotify(title, message) {
+  const c = haCfg();
+  if (!c.enabled || !c.url || !c.service || !c.token) return;
+  try {
+    await fetch(`${haBase(c.url)}/api/services/notify/${encodeURIComponent(c.service)}`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + c.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ title, message }),
+    });
+  } catch {}   // best-effort — HA unreachable shouldn't break the app
+}
+
+async function haLoadServices() {
+  const url = haBase($("#cfgHaUrl").value);
+  const token = $("#cfgHaToken").value.trim() || haCfg().token;
+  if (!url || !token) { toast("Enter HA URL and token first"); return; }
+  toast("Loading notify services…");
+  try {
+    const res = await fetch(`${url}/api/services`, { headers: { "Authorization": "Bearer " + token } });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    const notify = Array.isArray(data) ? data.find(d => d.domain === "notify") : null;
+    const services = notify && notify.services ? Object.keys(notify.services) : [];
+    $("#haServiceList").innerHTML = services.map(s => `<option value="${s}"></option>`).join("");
+    toast(services.length ? `Loaded ${services.length} notify services` : "No notify services found");
+  } catch {
+    toast("Couldn't reach HA — check URL, token & CORS");
+  }
+}
+
+async function haTest() {
+  const c = haCfg();
+  const url = haBase($("#cfgHaUrl").value) || c.url;
+  const token = $("#cfgHaToken").value.trim() || c.token;
+  const service = $("#cfgHaService").value.trim() || c.service;
+  if (!url || !token || !service) { toast("Enter URL, token & service first"); return; }
+  toast("Sending test…");
+  try {
+    const res = await fetch(`${url}/api/services/notify/${encodeURIComponent(service)}`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "🥓 Salume Studio", message: "Test notification — your curing-chamber alerts are wired up." }),
+    });
+    toast(res.ok ? "Test sent ✓ — check your phone" : "HA rejected it (HTTP " + res.status + ")");
+  } catch {
+    toast("Couldn't reach HA — check URL, token & CORS");
+  }
 }
 
 /* minimal MQTT 3.1.1 over WebSocket — subscribe-only, QoS 0, no dependencies */
@@ -1727,6 +1819,12 @@ $("#chGear").addEventListener("click", () => {
   $("#cfgSt").value = c.sTopic || "charcuterie/monitor/status";
   $("#cfgTmin").value = r.tMin; $("#cfgTmax").value = r.tMax;
   $("#cfgHmin").value = r.hMin; $("#cfgHmax").value = r.hMax;
+  const h = haCfg();
+  $("#cfgHaEnabled").checked = !!h.enabled;
+  $("#cfgHaUrl").value = h.url || "";
+  $("#cfgHaToken").value = "";                 // never echo the stored token; blank keeps it
+  $("#cfgHaService").value = h.service || "";
+  updateHaStatus();
   $("#chCfg").classList.toggle("hidden");
 });
 $("#cfgSave").addEventListener("click", () => {
@@ -1740,14 +1838,27 @@ $("#cfgSave").addEventListener("click", () => {
     tMin: num($("#cfgTmin").value, CH_DEFAULTS.tMin), tMax: num($("#cfgTmax").value, CH_DEFAULTS.tMax),
     hMin: num($("#cfgHmin").value, CH_DEFAULTS.hMin), hMax: num($("#cfgHmax").value, CH_DEFAULTS.hMax),
   }));
+  // HA notify settings — keep the existing token when the field is left blank.
+  const prevHa = haCfg();
+  const tokenInput = $("#cfgHaToken").value.trim();
+  localStorage.setItem(CH_HA, JSON.stringify({
+    enabled: $("#cfgHaEnabled").checked,
+    url: haBase($("#cfgHaUrl").value),
+    service: $("#cfgHaService").value.trim(),
+    token: tokenInput || prevHa.token || "",
+  }));
   $("#chCfg").classList.add("hidden");
   applyTargetLabels();
+  updateHaStatus();
   if ($("#chHist").open) renderChamberHistory();
   evaluateAlerts();
   toast("Chamber settings saved");
   connectChamber();
 });
+$("#haLoadBtn").addEventListener("click", haLoadServices);
+$("#haTestBtn").addEventListener("click", haTest);
 applyTargetLabels();
+updateHaStatus();
 
 // Alerts toggle (browser notifications when readings leave range)
 alertsOn = localStorage.getItem(CH_ALERTS) === "1";

@@ -1,0 +1,190 @@
+# Charcuterie curing-chamber alerts — Home Assistant package
+# ==========================================================================
+# Pushes a phone notification when the fridge drifts out of range or the
+# sensor drops offline — so you're alerted even with no browser open. This is
+# the away-from-tab alerting the web app can't do over plain-HTTP LAN (browser
+# notifications need HTTPS); Home Assistant + the companion app don't.
+#
+# ---- Install -------------------------------------------------------------
+#   1. Copy this file to:  <config>/packages/charcuterie_alerts.yaml
+#   2. Ensure configuration.yaml loads the packages folder:
+#
+#        homeassistant:
+#          packages: !include_dir_named packages
+#
+#   3. >>> Replace every  notify.mobile_app_your_phone  below with your own
+#          notify action (Developer Tools → Actions → search "notify" to find
+#          it, e.g. notify.mobile_app_pixel_9). Use notify.notify to hit every
+#          registered device at once.
+#   4. Developer Tools → YAML → "Reload all YAML configuration" (or restart HA).
+#
+# It watches the two sensors the ESP8266 announces via MQTT discovery:
+#   sensor.charcuterie_temperature   (°C)
+#   sensor.charcuterie_humidity      (%)
+# If your entity IDs differ, adjust them throughout. Tune the target range
+# from Settings → Devices & Services → Helpers (four sliders, created below) —
+# no YAML editing needed. Defaults match the app's in-fridge drying range.
+# ==========================================================================
+
+# Tunable target range (Settings → Devices & Services → Helpers). `initial`
+# seeds the app's in-fridge defaults; note that with `initial` set, a HA restart
+# resets the slider to it. Remove the `initial:` line on a helper if you'd rather
+# your hand-tuned value persist across restarts.
+input_number:
+  charcuterie_temp_min:
+    name: Charcuterie temp min
+    initial: 1
+    min: -5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-low
+  charcuterie_temp_max:
+    name: Charcuterie temp max
+    initial: 5
+    min: -5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-high
+  charcuterie_hum_min:
+    name: Charcuterie humidity min
+    initial: 70
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+  charcuterie_hum_max:
+    name: Charcuterie humidity max
+    initial: 85
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+
+automation:
+  # ---- Temperature out of range -----------------------------------------
+  # 10-minute hold so a fridge defrost cycle or a door opening doesn't nag you.
+  - id: charcuterie_temp_out_of_range
+    alias: "Charcuterie: temperature out of range"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.charcuterie_temperature
+        above: input_number.charcuterie_temp_max
+        for: "00:10:00"
+        id: high
+      - platform: numeric_state
+        entity_id: sensor.charcuterie_temperature
+        below: input_number.charcuterie_temp_min
+        for: "00:10:00"
+        id: low
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "🌡️ Curing chamber — temperature"
+          message: >-
+            {{ states('sensor.charcuterie_temperature') }} °C,
+            {{ 'above' if trigger.id == 'high' else 'below' }} the target range
+            ({{ states('input_number.charcuterie_temp_min') | round(1) }}–{{
+            states('input_number.charcuterie_temp_max') | round(1) }} °C).
+          data:
+            tag: charcuterie-temp
+            channel: Charcuterie
+            importance: high
+
+  # ---- Humidity out of range --------------------------------------------
+  - id: charcuterie_humidity_out_of_range
+    alias: "Charcuterie: humidity out of range"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.charcuterie_humidity
+        above: input_number.charcuterie_hum_max
+        for: "00:10:00"
+        id: high
+      - platform: numeric_state
+        entity_id: sensor.charcuterie_humidity
+        below: input_number.charcuterie_hum_min
+        for: "00:10:00"
+        id: low
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "💧 Curing chamber — humidity"
+          message: >-
+            {{ states('sensor.charcuterie_humidity') }} %,
+            {{ 'above' if trigger.id == 'high' else 'below' }} the target range
+            ({{ states('input_number.charcuterie_hum_min') | round(0) }}–{{
+            states('input_number.charcuterie_hum_max') | round(0) }} %).
+          data:
+            tag: charcuterie-humidity
+            channel: Charcuterie
+            importance: high
+
+  # ---- Sensor offline ----------------------------------------------------
+  # Fires when either reading goes unavailable/unknown for 5 min (the ESP's
+  # last-will publishes "offline", which turns the sensors unavailable).
+  - id: charcuterie_sensor_offline
+    alias: "Charcuterie: sensor offline"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id:
+          - sensor.charcuterie_temperature
+          - sensor.charcuterie_humidity
+        to:
+          - "unavailable"
+          - "unknown"
+        for: "00:05:00"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "⚠️ Curing chamber — sensor offline"
+          message: >-
+            No readings from the charcuterie monitor for 5 minutes. Check the
+            ESP8266 power and Wi-Fi.
+          data:
+            tag: charcuterie-offline
+            channel: Charcuterie
+            importance: high
+
+  # ---- All-clear ---------------------------------------------------------
+  # Notifies once when temp AND humidity are both back inside range (and the
+  # sensor is reporting again) after having left it.
+  - id: charcuterie_back_in_range
+    alias: "Charcuterie: back in range"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.charcuterie_temperature
+        above: input_number.charcuterie_temp_min
+        below: input_number.charcuterie_temp_max
+        for: "00:05:00"
+      - platform: numeric_state
+        entity_id: sensor.charcuterie_humidity
+        above: input_number.charcuterie_hum_min
+        below: input_number.charcuterie_hum_max
+        for: "00:05:00"
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.charcuterie_temperature
+        above: input_number.charcuterie_temp_min
+        below: input_number.charcuterie_temp_max
+      - condition: numeric_state
+        entity_id: sensor.charcuterie_humidity
+        above: input_number.charcuterie_hum_min
+        below: input_number.charcuterie_hum_max
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "✅ Curing chamber — back to normal"
+          message: >-
+            {{ states('sensor.charcuterie_temperature') }} °C /
+            {{ states('sensor.charcuterie_humidity') }} % — both back in range.
+          data:
+            # Same tags clear the earlier warnings on the Android companion app.
+            tag: charcuterie-temp
+            channel: Charcuterie

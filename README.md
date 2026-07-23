@@ -118,6 +118,22 @@ humidity leaves its target range (or the sensor drops offline) you get a browser
 notification and an in-panel banner, re-nudged every 30 minutes while the problem
 persists, and an all-clear when it recovers. Notifications need permission and a
 secure context (HTTPS or `localhost`); over plain-HTTP LAN the banner still shows.
+
+**Phone alerts, configured in the app.** In the chamber ⚙️ settings there's a
+**Home Assistant notify** section: tick *Send alerts via a Home Assistant notify
+service*, enter your **HA Base URL**, a **long-lived access token** (HA → Profile
+→ Security), and a **notify service** (hit **⟳ Load** to pull the list from HA, or
+type `notify` to hit every device), then **Test**. When the chamber goes out of
+range the app pushes to that service — no YAML to edit. Because the app has no
+backend, these fire **while the app is open** in a browser or installed PWA; for
+round-the-clock alerts, also use the Home Assistant package below.
+
+> The browser calls HA's REST API directly, so it needs to reach HA cross-origin.
+> Two ways: add your app's origin to `http.cors_allowed_origins` in HA's config,
+> **or** — with no HA-side change — proxy HA through this server (uncomment the
+> `/ha/` block in [`nginx/default.conf`](nginx/default.conf) and set the app's
+> *HA Base URL* to `/ha`). The token is stored only in your browser's
+> `localStorage`.
 Expand **📈 Condition history** to see temp and humidity plotted over the last few
 days with the target band shaded — handy for tracing a bad batch back to a
 humidity swing. History is sampled every 5 minutes and kept in the browser
@@ -158,6 +174,15 @@ the MQTT integration is connected to the broker, HA auto-creates the
 `sensor.charcuterie_temperature` / `sensor.charcuterie_humidity` entities (with
 availability from the `status` last-will) — no YAML needed. Add a `history-graph`
 card with those two entities for temp/humidity history and long-term trends.
+
+**Phone alerts when you're not at the app.** The web app's in-panel banner only
+helps if a browser tab is open and visible, and its browser-notification option
+can't fire over plain-HTTP LAN (that needs HTTPS). Home Assistant fills the gap:
+drop in the ready-made package at
+[`home-assistant/charcuterie_alerts.yaml`](home-assistant/charcuterie_alerts.yaml)
+to push a companion-app notification when temp/humidity leaves your target range
+or the sensor drops offline — tunable from HA Helpers, no browser required. See
+[`home-assistant/README.md`](home-assistant/README.md) for setup.
 
 > **If HA never creates the entities** (but temp/humidity still show up in MQTT
 > Explorer), two silent-failure causes are far and away the most common:
@@ -229,4 +254,5 @@ Dockerfile            # nginx:alpine serving the app
 docker-compose.yml    # one-command build/run + data volume
 nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy
 firmware/             # ESP8266 sketch for the DHT fridge sensor
+home-assistant/       # ready-to-paste HA package for phone alerts
 ```
