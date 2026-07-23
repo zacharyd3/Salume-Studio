@@ -51,10 +51,25 @@ Your curing entries live in the browser's `localStorage`, but the app also
 clears and is shared across every device that opens the app.
 
 - On load, the app fetches `data/curing.json` from the server (the shared
-  source of truth) and shows it.
+  source of truth) and shows it. It also **re-pulls** whenever you switch back
+  to the tab or into **My Curing**, so an edit made on another device shows up
+  without a manual reload (it won't overwrite a local change that's still
+  saving, or yank the field you're editing).
 - On every change it writes the file back via **nginx WebDAV** (a debounced
   `PUT`). The little pill at the top of **My Curing** shows the sync state
-  (`Synced ✓`, `Saving…`, or `Local only` when opened as a bare file).
+  (`Synced ✓`, `Saving…`, or `Local only` when opened as a bare file) — **tap
+  it to sync now**.
+
+Any weigh-in can be corrected after the fact: in a batch's **Weigh-in history**,
+tap a **date** or a **weight** to edit it, or **✕** to delete it. Editing the
+earliest weigh-in updates the batch's start weight (and re-derives its finish
+target); moving a weigh-in onto a day that already has one keeps a single entry
+per day. Edits sync like everything else.
+
+> Sync is last-writer-wins on the whole file, which is right for one person
+> moving between devices. If you keep the app open on two devices at once and
+> edit both, whichever saves last wins — the auto-refresh above makes that
+> rare in practice.
 
 The file is bind-mounted to the host, so it lands at:
 

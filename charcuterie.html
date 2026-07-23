@@ -208,6 +208,10 @@
   details.log ul { margin: 8px 0 0; padding-left: 0; list-style: none; font-size: 13px; font-variant-numeric: tabular-nums; }
   details.log li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--line); }
   details.log button { border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; }
+  details.log .logvals { display: flex; gap: 18px; }
+  details.log .loglink { color: var(--ink); font-size: 13px; padding: 0; border-bottom: 1px dotted var(--ink-soft); }
+  details.log .loglink:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  details.log .log-hint { font-size: 11px; color: var(--ink-soft); margin-top: 6px; }
 
   .foot { text-align: center; color: var(--ink-soft); font-size: 12px; margin-top: 26px; line-height: 1.7; }
   .toast {
@@ -869,7 +873,7 @@ function selectTab(which) {
   $("#tab-track").setAttribute("aria-selected", !calc);
   $("#view-calc").classList.toggle("hidden", !calc);
   $("#view-track").classList.toggle("hidden", calc);
-  if (!calc) renderTracker();
+  if (!calc) { renderTracker(); refreshFromServerIfIdle(); }
 }
 $("#tab-calc").addEventListener("click", () => selectTab("calc"));
 $("#tab-track").addEventListener("click", () => selectTab("track"));
@@ -1056,6 +1060,7 @@ function updateCount() {
 const SYNC_URL = "data/curing.json";          // same-origin, relative to the page
 const syncOn = location.protocol === "http:" || location.protocol === "https:";
 let syncTimer = null, applyingRemote = false;
+let pushState = "idle";                        // "idle" | "pending" | "error" — gates auto-refresh
 
 function setSyncStatus(state, text) {
   const el = $("#syncStatus");
@@ -1077,11 +1082,13 @@ function normalizeList(raw) {          // accept a bare array or a { recipes:[..
 function scheduleServerPush() {
   if (!syncOn || applyingRemote) return;
   clearTimeout(syncTimer);
+  pushState = "pending";
   setSyncStatus("saving", "Saving…");
   syncTimer = setTimeout(pushToServer, 600);
 }
 async function pushToServer() {
   if (!syncOn) return;
+  clearTimeout(syncTimer); syncTimer = null;
   try {
     const res = await fetch(SYNC_URL, {
       method: "PUT",
@@ -1089,10 +1096,22 @@ async function pushToServer() {
       body: localStorage.getItem(STORE) || "[]",
     });
     if (!res.ok) throw new Error(res.status);
+    pushState = "idle";
     setSyncStatus("ok", "Synced ✓");
   } catch {
+    pushState = "error";     // keep local changes; auto-refresh stays blocked until a good push
     setSyncStatus("error", "Sync error — saved locally");
   }
+}
+
+// Pull the shared file when it's safe — i.e. no local change is waiting to be
+// saved and the user isn't mid-edit — so edits made on another device appear
+// here without a manual reload.
+function refreshFromServerIfIdle() {
+  if (!syncOn || applyingRemote || pushState !== "idle") return;
+  const ae = document.activeElement;
+  if (ae && ae.matches && ae.matches("input, textarea")) return;
+  pullFromServer();
 }
 async function pullFromServer() {
   if (!syncOn) { setSyncStatus("off", "Local only"); return; }
@@ -1277,9 +1296,15 @@ function cardHTML(e) {
       <label class="notes-lbl" for="notes-${e.id}">📝 Notes</label>
       <textarea class="notes" id="notes-${e.id}" data-role="notes" data-id="${e.id}"
         placeholder="Observations — wiped mould day 12, smells nutty, bumped humidity…">${notesVal}</textarea>
-      <ul>${e.logs.slice().reverse().map((l, i, a) =>
-        `<li><span>${fmtDate(l.date)}</span><span>${num(l.weight)} g</span>
-         <button data-role="dellog" data-id="${e.id}" data-idx="${e.logs.length - 1 - i}">${e.logs.length > 1 ? "✕" : ""}</button></li>`).join("")}</ul>
+      <ul>${e.logs.slice().reverse().map((l, i) => {
+        const idx = e.logs.length - 1 - i;
+        return `<li><span class="logvals">
+           <button class="loglink" data-role="editdate" data-id="${e.id}" data-idx="${idx}" title="Edit date">${fmtDate(l.date)}</button>
+           <button class="loglink" data-role="editwt" data-id="${e.id}" data-idx="${idx}" title="Edit weight">${num(l.weight)} g</button>
+         </span>
+         <button data-role="dellog" data-id="${e.id}" data-idx="${idx}" title="Delete this weigh-in">${e.logs.length > 1 ? "✕" : ""}</button></li>`;
+      }).join("")}</ul>
+      <div class="log-hint">Tap a date or weight to correct it.</div>
       <div class="btn-row" style="margin-top:12px">
         <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print recipe</button>
         <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
@@ -1356,8 +1381,13 @@ function wireCard(e) {
   $$(`button[data-role="dellog"][data-id="${e.id}"]`, root).forEach(b => b.addEventListener("click", () => {
     const idx = +b.dataset.idx;
     const list = loadAll(); const item = list.find(x => x.id === e.id);
-    if (item && item.logs.length > 1) { item.logs.splice(idx, 1); saveAll(list); renderTracker(); }
+    if (item && item.logs.length > 1) { item.logs.splice(idx, 1); syncStartFromLogs(item); saveAll(list); renderTracker(); }
   }));
+  // Edit a past weigh-in's weight or date (fixes typos, corrects a missed day).
+  $$(`button[data-role="editwt"][data-id="${e.id}"]`, root).forEach(b =>
+    b.addEventListener("click", () => editLogWeight(e.id, +b.dataset.idx)));
+  $$(`button[data-role="editdate"][data-id="${e.id}"]`, root).forEach(b =>
+    b.addEventListener("click", () => editLogDate(e.id, +b.dataset.idx)));
   // Rename by clicking the name
   const nameEl = $(`.ename[data-id="${e.id}"]`, root);
   nameEl.style.cursor = "text"; nameEl.title = "Click to rename";
@@ -1382,6 +1412,49 @@ function logWeight(id, weight) {
   saveAll(list);
   renderTracker();
   toast(weight <= e.targetWeight ? "🎉 Target reached — pull it out!" : "Logged " + weight + "g");
+}
+
+/* Keep the entry's starting weight/date pinned to its earliest weigh-in, so the
+   Start stat, target, progress and chart stay consistent after an edit/delete. */
+function syncStartFromLogs(e) {
+  if (!e.logs.length) return;
+  const first = e.logs[0];
+  e.startDate = first.date;
+  if (e.startWeight !== first.weight) {
+    e.startWeight = first.weight;
+    e.targetWeight = Math.round(first.weight * (1 - e.target / 100));
+  }
+}
+
+function editLogWeight(id, idx) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e || !e.logs[idx]) return;
+  const raw = prompt(`Weight on ${fmtDate(e.logs[idx].date)} (g):`, e.logs[idx].weight);
+  if (raw == null) return;                                   // cancelled
+  const w = Math.round(parseFloat(raw));
+  if (!w || w <= 0) { toast("Enter a valid weight"); return; }
+  e.logs[idx].weight = w;
+  e.logs.sort((a, b) => a.date.localeCompare(b.date));
+  syncStartFromLogs(e);
+  saveAll(list); renderTracker(); toast("Weigh-in updated");
+}
+
+function editLogDate(id, idx) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e || !e.logs[idx]) return;
+  const raw = prompt("Date for this weigh-in (YYYY-MM-DD):", e.logs[idx].date);
+  if (raw == null) return;
+  const d = (raw || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(new Date(d + "T00:00:00").getTime())) {
+    toast("Use the date format YYYY-MM-DD"); return;
+  }
+  e.logs[idx].date = d;
+  // One weigh-in per day: if another entry already sits on this date, the edit wins.
+  const clash = e.logs.findIndex((l, i) => i !== idx && l.date === d);
+  if (clash !== -1) e.logs.splice(clash, 1);
+  e.logs.sort((a, b) => a.date.localeCompare(b.date));
+  syncStartFromLogs(e);
+  saveAll(list); renderTracker(); toast("Weigh-in updated");
 }
 
 /* ------------------------------ printing ------------------------------ */
@@ -1889,6 +1962,22 @@ $("#importFile").addEventListener("change", e => {
   e.target.value = "";
 });
 pullFromServer();
+
+// Cross-device freshness: re-pull the shared file when the app regains focus or
+// the tab becomes visible, so edits made on another device show up here without
+// a manual reload. Tapping the sync pill forces a sync now.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshFromServerIfIdle(); });
+window.addEventListener("focus", refreshFromServerIfIdle);
+const syncPill = $("#syncStatus");
+if (syncPill && syncOn) {
+  syncPill.style.cursor = "pointer";
+  syncPill.title = "Tap to sync now";
+  syncPill.addEventListener("click", () => {
+    if (pushState === "idle") pullFromServer();   // pull the latest
+    else pushToServer();                          // flush a pending/failed local change first
+  });
+}
+
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if ((localStorage.getItem(THEME) || "auto") === "auto") applyTheme("auto");
 });
