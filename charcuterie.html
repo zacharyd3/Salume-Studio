@@ -1152,7 +1152,7 @@ const CHAMBER = "salume.chamber.v1";
 const CH_DEFAULTS = { tMin: 1, tMax: 5, hMin: 70, hMax: 85 };   // in-fridge drying
 const T_MARGIN = 2, H_MARGIN = 5;                                // amber band just outside target
 let mqtt = null, mqttRetry = null, chWatch = null, chConnAt = 0, lastLiveAt = 0, sensorOnline = null;
-const STALE_MS = 180000;   // no fresh reading in 3 min (ESP publishes every 30s) => sensor offline
+const STALE_MS = 180000;   // no fresh reading in 3 min (ESP publishes every 15s) => sensor offline
 
 function chamberCfg() {
   try { return JSON.parse(localStorage.getItem(CHAMBER)) || {}; } catch { return {}; }
