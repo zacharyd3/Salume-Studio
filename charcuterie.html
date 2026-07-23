@@ -1151,8 +1151,8 @@ function printSaved(e) {
 const CHAMBER = "salume.chamber.v1";
 const CH_DEFAULTS = { tMin: 1, tMax: 5, hMin: 70, hMax: 85 };   // in-fridge drying
 const T_MARGIN = 2, H_MARGIN = 5;                                // amber band just outside target
-let mqtt = null, mqttRetry = null, chWatch = null, chConnAt = 0, lastLiveAt = 0;
-const STALE_MS = 180000;   // no fresh reading in 3 min (ESP publishes every 60s) => sensor offline
+let mqtt = null, mqttRetry = null, chWatch = null, chConnAt = 0, lastLiveAt = 0, sensorOnline = null;
+const STALE_MS = 180000;   // no fresh reading in 3 min (ESP publishes every 30s) => sensor offline
 
 function chamberCfg() {
   try { return JSON.parse(localStorage.getItem(CHAMBER)) || {}; } catch { return {}; }
@@ -1193,6 +1193,11 @@ function showReading(which, value, unit) {
 function staleCells(on) {
   $$(".chamber-grid .cr").forEach(c => on ? c.setAttribute("data-stale", "") : c.removeAttribute("data-stale"));
 }
+function markFresh() {          // treat the current reading as current & show "Live"
+  lastLiveAt = Date.now();
+  staleCells(false);
+  setChamberStatus("ok", "Live");
+}
 function stopChWatch() { clearInterval(chWatch); chWatch = null; }
 function startChWatch() {
   stopChWatch();
@@ -1223,24 +1228,25 @@ function connectChamber() {
       password: cfg.pass || undefined,
       topics: [tTopic, hTopic, sTopic],
       onopen: () => {
-        chConnAt = Date.now(); lastLiveAt = 0;
+        chConnAt = Date.now(); lastLiveAt = 0; sensorOnline = null;
         setChamberStatus("connecting", "Connected — waiting for data…");
         startChWatch();
       },
       onmessage: (topic, msg, retained) => {
-        if (topic === sTopic) {          // sensor's own online/offline (LWT) — flag it instantly
-          if (msg.trim() === "offline") { staleCells(true); setChamberStatus("error", "Sensor offline"); }
-          else if (!lastLiveAt) setChamberStatus("connecting", "Connected — waiting for data…");
+        if (topic === sTopic) {          // sensor's own online/offline (LWT / availability)
+          sensorOnline = msg.trim() !== "offline";
+          if (!sensorOnline) { staleCells(true); setChamberStatus("error", "Sensor offline"); }
+          // Sensor reports online → the retained reading it left behind is current,
+          // so show it as Live immediately instead of waiting for the next publish.
+          else markFresh();
           return;
         }
         if (topic === tTopic) showReading("t", msg, " °C");
         else if (topic === hTopic) showReading("h", msg, " %");
         else return;
-        if (!retained) {                 // a genuine live update (not the initial retained snapshot)
-          lastLiveAt = Date.now();
-          staleCells(false);
-          setChamberStatus("ok", "Live");
-        }
+        // A genuine live publish is always current; a retained snapshot is current
+        // too as long as the sensor's availability says it's still online.
+        if (!retained || sensorOnline) markFresh();
       },
       onclose: () => {
         staleCells(true); stopChWatch();
