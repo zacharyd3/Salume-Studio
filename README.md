@@ -138,10 +138,12 @@ availability from the `status` last-will) — no YAML needed. Add a `history-gra
 card with those two entities for temp/humidity history and long-term trends.
 
 > **If HA never creates the entities** (but temp/humidity still show up in MQTT
-> Explorer), it's almost always the PubSubClient buffer. Its default packet size
-> is **256 bytes**, but each discovery payload is ~500 bytes, so those publishes
-> fail silently while the tiny reading payloads go through. The sketch calls
-> `client.setBufferSize(512)` in `setup()` to fix this — don't remove it.
+> Explorer), it's almost always the PubSubClient buffer. That buffer must hold
+> the **whole packet** — payload (~500 B) plus the config topic (~59 B) plus MQTT
+> header (~7 B), so ~570 B — and its default is just **256 bytes**, so the
+> discovery publishes fail silently while the tiny reading payloads go through.
+> The sketch calls `client.setBufferSize(1024)` in `setup()` to fix this — don't
+> shrink it below ~600.
 
 > **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
 > ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
