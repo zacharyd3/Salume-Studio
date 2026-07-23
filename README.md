@@ -83,7 +83,10 @@ const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='sa
 A NodeMCU V3 (ESP8266) with a DHT sensor lives on a wire in the curing fridge and
 publishes **retained** readings to a Mosquitto broker. The sketch lives in
 [`firmware/charcuterie_monitor/`](firmware/charcuterie_monitor/charcuterie_monitor.ino) —
-fill in your Wi-Fi/broker details at the top before flashing.
+fill in your Wi-Fi/broker details at the top before flashing. It connects to the
+broker **anonymously**; if yours requires a login, add credentials back in the
+sketch — and make sure that user may publish under `homeassistant/#`, not just
+`charcuterie/#`, or discovery will silently fail (see the Home Assistant note).
 
 | Topic                               | Value                       |
 | ----------------------------------- | --------------------------- |
@@ -138,12 +141,20 @@ availability from the `status` last-will) — no YAML needed. Add a `history-gra
 card with those two entities for temp/humidity history and long-term trends.
 
 > **If HA never creates the entities** (but temp/humidity still show up in MQTT
-> Explorer), it's almost always the PubSubClient buffer. That buffer must hold
-> the **whole packet** — payload (~500 B) plus the config topic (~59 B) plus MQTT
-> header (~7 B), so ~570 B — and its default is just **256 bytes**, so the
-> discovery publishes fail silently while the tiny reading payloads go through.
-> The sketch calls `client.setBufferSize(1024)` in `setup()` to fix this — don't
-> shrink it below ~600.
+> Explorer), two silent-failure causes are far and away the most common:
+>
+> 1. **PubSubClient buffer too small.** It must hold the **whole packet** — payload
+>    (~500 B) + config topic (~59 B) + MQTT header (~7 B), so ~570 B — and its
+>    default is just **256 bytes**. The sketch calls `client.setBufferSize(1024)`
+>    in `setup()` to fix this; don't shrink it below ~600.
+> 2. **Broker ACL blocking `homeassistant/#`.** If the ESP logs in as a user
+>    scoped to `charcuterie/#`, it can publish the readings but the broker rejects
+>    the discovery publishes to `homeassistant/sensor/.../config` — so the readings
+>    flow but no entities appear. The sketch connects **anonymously** to avoid
+>    this; if you must use a login, grant it publish rights under `homeassistant/#`.
+>
+> The firmware re-publishes discovery + `online` every 5 minutes, so HA also
+> recovers on its own after a broker restart or a cleared retained message.
 
 ### Updating the firmware over Wi-Fi (OTA)
 
