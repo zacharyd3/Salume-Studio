@@ -67,7 +67,21 @@ const unsigned long REANNOUNCE_INTERVAL_MS = 300000;   // 5 minutes
 // comfortable headroom.
 const uint16_t MQTT_BUFFER_SIZE = 1024;
 
+// The DHT sits at the end of a cable plumbed into the fridge, and a one-wire
+// sensor on a long run throws the occasional corrupted frame (a NaN read).
+// One bad read isn't news, so tolerate a few in a row before deciding the
+// sensor is genuinely down. The retry is cross-cycle, not a tight inline loop:
+// the DHT library caches within its sampling interval, so re-reading faster
+// than PUBLISH_INTERVAL_MS just hands back the same NaN. Each 15s cycle is a
+// fresh attempt.
+const uint8_t SENSOR_FAIL_THRESHOLD = 4;   // consecutive failed cycles before flagging offline
+
 #define DHTPIN  D4
+// DHT11 is what's wired in now. The DHT22/AM2302 is a drop-in upgrade - same
+// one-wire protocol and library, far better humidity accuracy and 0.1-degree
+// resolution. When it arrives, change DHT11 to DHT22 here and re-flash (add a
+// 4.7k-10k pull-up on the data line and keep the cable as short as you can for
+// a reliable read over the run).
 #define DHTTYPE DHT11
 
 // MQTT topics
@@ -249,19 +263,36 @@ void setup() {
 
   Serial.begin(115200);
 
+  // Seed the PRNG from the hardware RNG so the per-connection MQTT client id
+  // (random(0xffff) in reconnectMQTT) actually varies between boots. Left
+  // unseeded it repeats the same sequence every power-on, so a quick reconnect
+  // could collide with a session the broker hasn't timed out yet.
+  randomSeed(RANDOM_REG32);
+
   Serial.println();
   Serial.println("Connecting to WiFi...");
 
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);        // don't rewrite creds to flash on every boot
+  WiFi.setAutoReconnect(true);   // let the SDK re-join on its own if Wi-Fi drops
   WiFi.begin(ssid, password);
 
-  while (WiFi.status() != WL_CONNECTED) {
+  // Don't block here forever. If Wi-Fi is down at boot, spinning in this loop
+  // would also stop us from ever reaching setupOTA() and the telnet console -
+  // leaving no way in but a power-cycle. Wait ~20s, then carry on: loop()'s
+  // reconnect path plus setAutoReconnect() recover once Wi-Fi comes back.
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 20000) {
     delay(500);
     Serial.print(".");
   }
 
   Serial.println();
-  Serial.println("WiFi connected!");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi connected!");
+  } else {
+    Serial.println("WiFi not up yet - continuing; will keep retrying in the background.");
+  }
 
   client.setServer(mqtt_server, 1883);
 
@@ -321,10 +352,36 @@ void loop() {
     float humidity = dht.readHumidity();
     float temperature = dht.readTemperature();
 
+    static uint8_t sensorFailStreak = 0;
+    static bool sensorFlaggedOffline = false;
+
     if (isnan(humidity) || isnan(temperature)) {
-      Log.println("Sensor failed");
+      // Tolerate the odd corrupted frame from the cable run. Only after several
+      // consecutive failures do we treat the sensor as genuinely down and flip
+      // availability to "offline" - that stops Home Assistant and the chamber
+      // panel from presenting a frozen, stale retained value as if it were live.
+      sensorFailStreak++;
+      Log.print("Sensor read failed (");
+      Log.print(sensorFailStreak);
+      Log.print("/");
+      Log.print(SENSOR_FAIL_THRESHOLD);
+      Log.println(")");
+      if (sensorFailStreak >= SENSOR_FAIL_THRESHOLD && !sensorFlaggedOffline) {
+        client.publish(TOPIC_STATUS, "offline", true);
+        sensorFlaggedOffline = true;
+        Log.println("Sensor considered down - marked offline.");
+      }
       return;
     }
+
+    // Good read: clear the streak, and if we'd flagged the sensor down, bring
+    // availability back so the panels start trusting the readings again.
+    if (sensorFlaggedOffline) {
+      client.publish(TOPIC_STATUS, "online", true);
+      sensorFlaggedOffline = false;
+      Log.println("Sensor recovered - marked online.");
+    }
+    sensorFailStreak = 0;
 
     Log.print("Temperature: ");
     Log.print(temperature);
