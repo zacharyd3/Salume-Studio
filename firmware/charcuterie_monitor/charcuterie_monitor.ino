@@ -137,10 +137,10 @@ void announce() {
   const char* humConfigTopic  = "homeassistant/sensor/charcuterie_monitor/humidity/config";
 
   // "force_update":true makes Home Assistant record a state (and history point)
-  // on EVERY message, not just when the value changes. The DHT11 only resolves
-  // to whole degrees/percent, so back-to-back 15s reads are often the identical
-  // string; without force_update HA de-duplicates them and the entity looks like
-  // it only refreshes every ~30s (or slower). With it, you get a point every
+  // on EVERY message, not just when the value changes. HA otherwise de-duplicates
+  // identical consecutive values, so any run of unchanged readings (acute with a
+  // coarse sensor like the DHT11, but possible with any) makes the entity look
+  // like it only refreshes every ~30s or slower. With it, you get a point every
   // PUBLISH_INTERVAL_MS as expected.
 
   const char* tempConfig = R"rawliteral(

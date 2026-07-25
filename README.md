@@ -264,9 +264,12 @@ every 15 s, so you can confirm it's alive without plugging anything in. It's
 output-only (one client at a time) and stays responsive even while the broker is
 down.
 
-> **Note on the sensor:** a DHT11 is fine for proving the pipeline but is only
-> ±5% RH and unreliable above ~90% RH — the high end that matters for curing.
-> A DHT22/AM2302 or SHT31 is worth the swap before trusting the numbers.
+> **Note on the sensor:** this build uses a **DHT22/AM2302** (0.1° resolution,
+> ~±2–5% RH) — a real step up from the DHT11, which is only ±5% RH and unreliable
+> above ~90% RH, the high end that matters for curing. For the last word in
+> accuracy at high humidity, an **SHT31** is the next rung up. Note that any of
+> these needs to fully dry out after condensation before it reads true — a
+> soaked element pins at 100% RH and walks back down over hours as it dries.
 
 ## Repository layout
 
