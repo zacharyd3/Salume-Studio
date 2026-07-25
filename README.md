@@ -112,6 +112,71 @@ const b=new Blob([JSON.stringify({app:'salume-studio',version:1,recipes:JSON.par
 const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='salume-studio-backup.json';a.click();})()
 ```
 
+## Always-on recorder & history (server backend)
+
+The container runs a small **Python backend** alongside nginx (both in the one
+image — your `docker build` + `docker run` install script needs no changes). It
+does the two things a static page can't do on its own:
+
+- **Records history even with no browser open.** It subscribes to the chamber's
+  MQTT topics and writes samples to a SQLite database, so the **📈 Condition
+  history** chart is populated the moment you open the app — you no longer have
+  to leave a tab open for it to collect. The chart pulls from the server when the
+  backend is reachable and falls back to per-browser samples otherwise (e.g. when
+  the file is opened directly over `file://`).
+- **Alerts even with no browser open** (opt-in, no HA token needed). It evaluates
+  each reading against your target range and publishes an alert *state* to MQTT.
+
+Everything it persists lives under the **same data volume** the install script
+already mounts, so it survives rebuilds:
+
+```
+data/curing.json          your curing entries (unchanged)
+data/history.db           recorded temp/humidity/dew-point time series (SQLite)
+data/monitor-config.json  broker + thresholds, editable via the API
+```
+
+### API
+
+nginx reverse-proxies `/api/` to the backend on loopback, so only port 80 is ever
+exposed:
+
+| Endpoint            | Purpose                                                        |
+| ------------------- | ------------------------------------------------------------- |
+| `GET /api/latest`   | Most recent temp/humidity/dew-point + a `stale` flag          |
+| `GET /api/history`  | Bucketed series — `?hours=72&bucket=300` (seconds)            |
+| `GET /api/config`   | Current config (broker password masked)                       |
+| `POST /api/config`  | Update config (thresholds, broker, sample rate…)              |
+| `GET /api/health`   | Liveness (also used by the container healthcheck)             |
+
+On a fresh install the backend records with sensible defaults (broker
+`192.168.250.3:1883`, one sample/minute, ~13 months retention); edit
+`monitor-config.json` — or `POST /api/config` — to change the broker or the
+sample rate. If your broker isn't at the default, set `mqtt_host`/`mqtt_port`
+there (or pass `-e MQTT_HOST=… -e MQTT_PORT=…` if you'd rather do it in the run
+command).
+
+### Always-on alerting (token-free)
+
+Set `alerts.enabled` to `true` in `monitor-config.json` and the backend publishes
+a **retained** JSON alert to `charcuterie/monitor/alert` whenever the chamber
+leaves range (held for `hold_sec` to ride out a defrost cycle) or the sensor goes
+offline — and an `ok` all-clear when it recovers:
+
+```json
+{"state":"temp_high","temp":7.2,"hum":80,"dew":3.9,"ts":1737840000}
+```
+
+`state` is one of `ok`, `temp_high`, `temp_low`, `hum_high`, `hum_low`,
+`offline`. It deliberately **does not** call Home Assistant's REST API, so **no
+long-lived token is stored on the server**. To turn an alert into a phone push,
+let whatever already holds notify credentials subscribe to that topic — e.g. a
+one-line Home Assistant automation that fires `notify.mobile_app_…` on an MQTT
+message to `charcuterie/monitor/alert` whose `state` isn't `ok`. (The ready-made
+[`home-assistant/charcuterie_alerts.yaml`](home-assistant/charcuterie_alerts.yaml)
+package still works too, and alerts straight off the sensor entities — use either
+or both.)
+
 ## The fridge sensor (live chamber monitor)
 
 A NodeMCU V3 (ESP8266) with a DHT sensor lives on a wire in the curing fridge and
@@ -278,9 +343,11 @@ charcuterie.html      # the entire app (calculator, tracker, chamber monitor)
 manifest.webmanifest  # PWA manifest (installable app metadata)
 sw.js                 # service worker — offline app shell
 icon.png              # favicon + PWA + unraid Docker icon
-Dockerfile            # nginx:alpine serving the app
+Dockerfile            # nginx:alpine + Python backend, one image
+docker-entrypoint.sh  # runs nginx and the recorder backend together
 docker-compose.yml    # one-command build/run + data volume
-nginx/default.conf    # static serving, WebDAV data sync, MQTT WS proxy
+nginx/default.conf    # static serving, WebDAV data sync, /api/ + MQTT WS proxy
+backend/              # Python recorder/history/alert API (runs in the container)
 firmware/             # ESP8266 sketch for the DHT fridge sensor
 home-assistant/       # ready-to-paste HA package for phone alerts
 ```

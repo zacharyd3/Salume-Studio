@@ -2,9 +2,10 @@
  *
  * Strategy:
  *   - Precache the app shell (HTML, icon, manifest) on install.
- *   - Never touch the data sync endpoint (/data/) or the MQTT proxy (/mqtt):
- *     those must always hit the network so curing data and live readings stay
- *     current. Only same-origin GETs are handled at all.
+ *   - Never touch the data sync endpoint (/data/), the recorder API (/api/), or
+ *     the MQTT proxy (/mqtt): those must always hit the network so curing data,
+ *     recorded history, and live readings stay current. Only same-origin GETs
+ *     are handled at all.
  *   - Navigations & the shell use network-first (so a rebuilt app is picked up
  *     immediately when online) with a cache fallback for offline.
  *   - Other same-origin GETs use cache-first, falling back to the network.
@@ -32,7 +33,8 @@ self.addEventListener("fetch", (e) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;                 // let cross-origin pass through
-  if (url.pathname.startsWith("/data/") || url.pathname.startsWith("/mqtt")) return; // never cache
+  if (url.pathname.startsWith("/data/") || url.pathname.startsWith("/api/") ||
+      url.pathname.startsWith("/mqtt")) return; // never cache: live data & API
 
   const isShell = req.mode === "navigate" ||
     url.pathname === "/" || url.pathname.endsWith("charcuterie.html");

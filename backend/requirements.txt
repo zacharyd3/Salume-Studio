@@ -1,0 +1,4 @@
+# Salume Studio recorder/API backend — all pure-Python wheels, no compiler needed.
+paho-mqtt==2.1.0
+Flask==3.0.3
+waitress==3.0.0
