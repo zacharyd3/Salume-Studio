@@ -7,9 +7,11 @@ services:
       # host:container — change 8080 if that port is taken on your box.
       - "8080:80"
     volumes:
-      # Curing data is auto-synced here as JSON, so it lives on the host and
-      # is shared across every browser/device. Make sure the host dir exists
-      # and is writable by the container (chmod 777 on unraid appdata).
+      # Curing data (curing.json) is auto-synced here as JSON, and the recorder
+      # backend also keeps its history database (history.db) and config
+      # (monitor-config.json) here — so all of it lives on the host and survives
+      # rebuilds. Make sure the host dir exists and is writable by the container
+      # (chmod 777 on unraid appdata).
       - /mnt/user/appdata/salume-studio:/usr/share/nginx/html/data
     labels:
       # Makes unraid show a clickable "WebUI" link on the Docker tab. unraid

@@ -1857,21 +1857,43 @@ function seriesSVG(pts, valOf, color, tgtMin, tgtMax, unit) {
   </svg>`;
 }
 
-function renderChamberHistory() {
+/* Prefer history recorded by the in-container backend — it keeps recording with
+   no browser open, so the chart is full the moment you land on the page. Falls
+   back to the per-browser localStorage samples when the backend isn't reachable
+   (opened as a bare file://, or the API is down). Returns null on any failure so
+   the caller cleanly uses the fallback. */
+async function fetchServerHistory() {
+  try {
+    const hours = Math.round(HIST_MAX_AGE_MS / 3600000);
+    const res = await fetch(`/api/history?hours=${hours}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const pts = (j.points || [])
+      .filter(p => p.temp != null || p.hum != null)
+      .map(p => ({ t: p.t * 1000, temp: p.temp, hum: p.hum }));   // s → ms
+    return pts.length >= 2 ? pts : null;
+  } catch { return null; }
+}
+
+async function renderChamberHistory() {
   const body = $("#chHistBody"); if (!body) return;
-  const hist = chHistLoad();
+  const server = await fetchServerHistory();
+  const hist = server || chHistLoad();
+  const source = server ? "recorded on the server" : "sampled in this browser";
   if (hist.length < 2) {
     body.innerHTML = `<div class="chart-empty">Once readings come in, temp &amp; humidity are logged here so you can spot a spike after the fact.</div>`;
     return;
   }
   const r = chRanges();
-  const last = hist[hist.length - 1];
-  const spanH = (last.t - hist[0].t) / 3600000;
+  const fmt = v => v == null ? "–" : (+v).toFixed(1);
+  const lastT = [...hist].reverse().find(p => p.temp != null);
+  const lastH = [...hist].reverse().find(p => p.hum != null);
+  const spanH = (hist[hist.length - 1].t - hist[0].t) / 3600000;
   body.innerHTML =
     seriesSVG(hist, p => p.temp, "var(--accent)", r.tMin, r.tMax, " °C") +
     seriesSVG(hist, p => p.hum, "#2f6ad0", r.hMin, r.hMax, " %") +
-    `<div class="legend"><span class="lg-t">■ Temp <b>${last.temp} °C</b></span><span class="lg-h">■ Humidity <b>${last.hum} %</b></span></div>
-     <div class="hist-meta">${hist.length} readings over ${spanH < 1 ? "<1" : Math.round(spanH)} h · green band = your target range</div>`;
+    `<div class="legend"><span class="lg-t">■ Temp <b>${fmt(lastT && lastT.temp)} °C</b></span><span class="lg-h">■ Humidity <b>${fmt(lastH && lastH.hum)} %</b></span></div>
+     <div class="hist-meta">${hist.length} points over ${spanH < 1 ? "<1" : Math.round(spanH)} h · ${source} · green band = your target range</div>`;
 }
 
 /* ---------- out-of-range alerting ---------- */
