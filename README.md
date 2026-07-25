@@ -47,6 +47,21 @@ docker build -t salume-studio .
 docker run -d --name salume-studio -p 8080:80 --restart unless-stopped salume-studio
 ```
 
+### unraid (one script)
+
+[`install.sh`](install.sh) is the deploy used on the unraid box: it pulls the
+latest `main`, builds the single image (nginx **and** the recorder backend baked
+in), and recreates the container with the data volume mounted. Run it again any
+time to update.
+
+```bash
+./install.sh
+```
+
+Everything ships in one container and persists under one volume
+(`/mnt/user/appdata/salume-studio`), so there's nothing else to install — adjust
+`PORT`, `DATA`, or `BRANCH` at the top of the script if your box differs.
+
 ## Data, backups & auto-sync
 
 Your curing entries live in the browser's `localStorage`, but the app also
