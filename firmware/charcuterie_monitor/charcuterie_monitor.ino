@@ -77,12 +77,12 @@ const uint16_t MQTT_BUFFER_SIZE = 1024;
 const uint8_t SENSOR_FAIL_THRESHOLD = 4;   // consecutive failed cycles before flagging offline
 
 #define DHTPIN  D4
-// DHT11 is what's wired in now. The DHT22/AM2302 is a drop-in upgrade - same
-// one-wire protocol and library, far better humidity accuracy and 0.1-degree
-// resolution. When it arrives, change DHT11 to DHT22 here and re-flash (add a
-// 4.7k-10k pull-up on the data line and keep the cable as short as you can for
-// a reliable read over the run).
-#define DHTTYPE DHT11
+// DHT22/AM2302 is what's wired in now - a big step up from the old DHT11 in
+// humidity accuracy and with 0.1-degree resolution. This build uses the common
+// 3-pin breakout module, which carries its own pull-up on the daughterboard, so
+// no external resistor is needed on the data line. Keep the cable as short as
+// you can for a reliable read over the run into the fridge.
+#define DHTTYPE DHT22
 
 // MQTT topics
 const char* TOPIC_STATUS      = "charcuterie/monitor/status";
