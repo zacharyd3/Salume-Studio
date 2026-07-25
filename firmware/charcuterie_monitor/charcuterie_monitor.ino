@@ -136,6 +136,13 @@ void announce() {
   const char* tempConfigTopic = "homeassistant/sensor/charcuterie_monitor/temperature/config";
   const char* humConfigTopic  = "homeassistant/sensor/charcuterie_monitor/humidity/config";
 
+  // "force_update":true makes Home Assistant record a state (and history point)
+  // on EVERY message, not just when the value changes. The DHT11 only resolves
+  // to whole degrees/percent, so back-to-back 15s reads are often the identical
+  // string; without force_update HA de-duplicates them and the entity looks like
+  // it only refreshes every ~30s (or slower). With it, you get a point every
+  // PUBLISH_INTERVAL_MS as expected.
+
   const char* tempConfig = R"rawliteral(
 {
   "name":"Charcuterie Temperature",
@@ -147,6 +154,7 @@ void announce() {
   "unit_of_measurement":"°C",
   "device_class":"temperature",
   "state_class":"measurement",
+  "force_update":true,
   "device":{
     "identifiers":["charcuterie_monitor"],
     "name":"Charcuterie Monitor",
@@ -167,6 +175,7 @@ void announce() {
   "unit_of_measurement":"%",
   "device_class":"humidity",
   "state_class":"measurement",
+  "force_update":true,
   "device":{
     "identifiers":["charcuterie_monitor"],
     "name":"Charcuterie Monitor",
