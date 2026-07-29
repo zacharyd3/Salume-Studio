@@ -76,6 +76,23 @@ earliest weigh-in updates the batch's start weight (and re-derives its finish
 target); moving a weigh-in onto a day that already has one keeps a single entry
 per day. Edits sync like everything else.
 
+Plans change once a piece is hanging. **✏️ Edit recipe** (in a batch's
+**Notes · actions**) opens an editor where you can rename it, tweak the cure
+length, and change the ingredient list — adjust amounts, rename, remove, or add
+something you improvised (say a gochujang glaze that wasn't in the original),
+choosing whether each goes in the **cure rub** or the **exterior crust**. Steps
+are one-per-line. The edited recipe is what prints and syncs from then on.
+
+When a drying batch hits its target it shows **🏁 Finished? Rate this batch** —
+tap **1–5 stars** to record how the batch turned out (tap again to change,
+**clear** to reset). Ratings ride along with the batch's notes, so past batches
+become a searchable record of what worked.
+
+Finished with a batch? **🗄 Archive** tucks it into a collapsible **Archive**
+section at the bottom of **My Curing**, out of the active list (and out of the
+tab's count) but never deleted. Archived cards keep their rating, notes, print,
+and edit-recipe actions, and **↩ Restore** brings one back to the active list.
+
 > Sync is last-writer-wins on the whole file, which is right for one person
 > moving between devices. If you keep the app open on two devices at once and
 > edit both, whichever saves last wins — the auto-refresh above makes that
