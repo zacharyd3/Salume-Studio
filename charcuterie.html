@@ -447,7 +447,82 @@
       font:inherit;font-size:13px;line-height:1.45;padding:8px 10px;border-radius:10px;
       border:1px solid var(--line,#8883);background:var(--bg-elev,#fff);color:inherit}
     .notes:focus{outline:none;border-color:var(--accent,#b23b3b)}
+
+    /* Rating stars + finish panel */
+    .finish-panel{margin-top:14px;padding:12px;border-radius:12px;background:var(--bg-sunk);text-align:center}
+    .finish-lbl{font-size:12px;font-weight:700;letter-spacing:.03em;color:var(--ink-soft);margin-bottom:6px}
+    .rating{display:inline-flex;align-items:center;gap:1px}
+    .star{border:0;background:none;cursor:pointer;font-size:26px;line-height:1;padding:2px 3px;color:var(--line)}
+    .star.on{color:#e6a817}
+    .star-clear{border:0;background:none;cursor:pointer;color:var(--ink-soft);font:inherit;font-size:11px;margin-left:10px;text-decoration:underline}
+
+    /* Archive section */
+    .archive{margin-top:10px;border-top:1px dashed var(--line);padding-top:6px}
+    .archive>summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--ink-soft);
+      list-style:none;user-select:none;padding:8px 2px}
+    .archive>summary::-webkit-details-marker{display:none}
+    .archive>summary::before{content:"▸ "}
+    .archive[open]>summary::before{content:"▾ "}
+    .archive-body{margin-top:8px}
+    .arch-card{opacity:.94}
+    .all-archived{text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 16px}
+
+    /* Recipe editor modal */
+    .modal-back{position:fixed;inset:0;z-index:200;background:rgba(20,14,10,.55);
+      display:flex;align-items:flex-end;justify-content:center;padding:0}
+    @media(min-width:560px){.modal-back{align-items:center;padding:20px}}
+    .modal{background:var(--bg-elev);color:var(--ink);width:100%;max-width:560px;
+      max-height:92vh;display:flex;flex-direction:column;border-radius:18px 18px 0 0;
+      box-shadow:var(--shadow);overflow:hidden}
+    @media(min-width:560px){.modal{border-radius:18px}}
+    .modal-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)}
+    .modal-head h3{margin:0;font-size:17px;flex:1}
+    .modal-body{padding:18px;overflow-y:auto}
+    .modal-foot{display:flex;gap:10px;padding:14px 18px;border-top:1px solid var(--line)}
+    .modal-foot .btn{flex:1}
+    .ed-hint{font-size:12px;color:var(--ink-soft);margin:-4px 0 10px}
+    .ed-ing{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+    .ed-ing .ed-ing-label{flex:1;min-width:0}
+    .ed-ing .ed-ing-grams{width:72px;flex:none;text-align:right}
+    .ed-ing .ed-ing-stage{width:104px;flex:none}
+    .ed-ing-del{border:1px solid var(--line);background:var(--bg);color:var(--accent);
+      width:38px;height:42px;flex:none;border-radius:10px;cursor:pointer;font-size:15px}
+    #edAddIng{margin-top:4px}
   </style>
+</div>
+
+<!-- ============ RECIPE EDITOR MODAL ============ -->
+<div class="modal-back hidden" id="editBack">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <div class="modal-head">
+      <h3 id="editTitle">Edit recipe</h3>
+      <button class="icon-btn" id="editClose" title="Close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="lbl" for="edName">Name</label>
+        <input id="edName" type="text" placeholder="e.g. Gochujang Lonzino">
+      </div>
+      <div class="field">
+        <label class="lbl" for="edCureDays">Cure length <span class="hint">— free text, shown on the card &amp; printout</span></label>
+        <input id="edCureDays" type="text" placeholder="e.g. 10–14 days">
+      </div>
+      <div class="field">
+        <label class="lbl">Ingredients</label>
+        <div class="ed-hint">Change amounts, rename, or add something you improvised. Stage sets whether it goes in the cure rub or the exterior crust.</div>
+        <div id="edIngredients"></div>
+        <button type="button" class="btn sm ghost" id="edAddIng">＋ Add ingredient</button>
+      </div>
+      <div class="field">
+        <label class="lbl" for="edSteps">Steps <span class="hint">— one per line</span></label>
+        <textarea id="edSteps" class="notes" style="min-height:170px"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="edCancel">Cancel</button>
+      <button class="btn good" id="edSave">Save changes</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -1058,7 +1133,7 @@ function saveAll(list) {
   scheduleServerPush();
 }
 function updateCount() {
-  const n = loadAll().length, b = $("#trackCount");
+  const n = loadAll().filter(e => !e.archived).length, b = $("#trackCount");
   b.textContent = n; b.classList.toggle("hidden", n === 0);
 }
 
@@ -1217,9 +1292,158 @@ function renderTracker() {
       </div>`;
     return;
   }
-  box.innerHTML = list.map(cardHTML).join("");
-  list.forEach(wireCard);
+  const active = list.filter(e => !e.archived);
+  const archived = list.filter(e => e.archived);
+  box.innerHTML =
+    (active.length
+      ? active.map(cardHTML).join("")
+      : `<div class="card all-archived">Everything's in the archive. Restore a batch below, or start a new one from the Calculator.</div>`)
+    + archiveSectionHTML(archived);
+  active.forEach(wireCard);
+  archived.forEach(e => wireArchived(e, $(`.card[data-id="${e.id}"]`)));
   checkCureCompletions();
+}
+
+/* ---------- rating (1–5 stars) for finished / archived batches ---------- */
+function ratingHTML(e) {
+  const r = e.rating || 0;
+  let s = `<div class="rating" data-id="${e.id}">`;
+  for (let i = 1; i <= 5; i++)
+    s += `<button class="star ${i <= r ? "on" : ""}" data-role="rate" data-id="${e.id}" data-v="${i}"
+       aria-label="${i} star${i === 1 ? "" : "s"}" title="${i} star${i === 1 ? "" : "s"}">${i <= r ? "★" : "☆"}</button>`;
+  if (r) s += `<button class="star-clear" data-role="rate" data-id="${e.id}" data-v="0" title="Clear rating">clear</button>`;
+  s += `</div>`;
+  return s;
+}
+function setRating(id, v) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e) return;
+  if (v) e.rating = v; else delete e.rating;
+  saveAll(list); renderTracker();
+  if (v) toast("Rated " + v + "★");
+}
+function wireRating(e, root) {
+  $$(`button[data-role="rate"][data-id="${e.id}"]`, root)
+    .forEach(b => b.addEventListener("click", () => setRating(e.id, +b.dataset.v)));
+}
+
+/* ---------- archive ---------- */
+function archiveBatch(id) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e) return;
+  e.archived = true; e.archivedDate = todayISO();
+  saveAll(list); renderTracker(); toast("Archived 🗄");
+}
+function unarchiveBatch(id) {
+  const list = loadAll(); const e = list.find(x => x.id === id);
+  if (!e) return;
+  e.archived = false; delete e.archivedDate;
+  saveAll(list); renderTracker(); toast("Restored");
+}
+function archiveSectionHTML(archived) {
+  if (!archived.length) return "";
+  return `<details class="archive">
+      <summary>🗄 Archive (${archived.length})</summary>
+      <div class="archive-body">${archived.map(archivedCardHTML).join("")}</div>
+    </details>`;
+}
+function archivedCardHTML(e) {
+  const dry = (e.phase || "dry") === "dry" && e.logs.length;
+  let summary;
+  if (dry) {
+    const cur = e.logs[e.logs.length - 1].weight;
+    const lossPct = e.startWeight ? ((e.startWeight - cur) / e.startWeight) * 100 : 0;
+    summary = `${num(cur)} g final · ${lossPct.toFixed(0)}% lost · ${e.logs.length} weigh-in${e.logs.length === 1 ? "" : "s"}`;
+  } else {
+    summary = "cured · never hung to dry";
+  }
+  const notesVal = (e.notes || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<div class="card arch-card" data-id="${e.id}">
+    <div class="track-head">
+      <div style="flex:1">
+        <div class="nm">${e.emoji} <span>${e.name}</span></div>
+        <div class="meta">🗄 Archived ${e.archivedDate ? fmtDate(e.archivedDate) : ""} · ${summary}</div>
+      </div>
+    </div>
+    <div class="finish-panel"><div class="finish-lbl">Rating</div>${ratingHTML(e)}</div>
+    ${notesVal ? `<div class="cure-note">📝 ${notesVal}</div>` : ""}
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn sm ghost" data-role="editrecipe" data-id="${e.id}">✏️ Edit recipe</button>
+      <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print</button>
+      <button class="btn sm good" data-role="unarchive" data-id="${e.id}">↩ Restore</button>
+      <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
+    </div>
+  </div>`;
+}
+function wireArchived(e, root) {
+  if (!root) return;
+  wireRating(e, root);
+  const un = $(`button[data-role="unarchive"][data-id="${e.id}"]`, root);
+  if (un) un.addEventListener("click", () => unarchiveBatch(e.id));
+  const del = $(`button[data-role="del"][data-id="${e.id}"]`, root);
+  if (del) del.addEventListener("click", () => {
+    if (confirm(`Delete "${e.name}"? This can't be undone.`)) {
+      saveAll(loadAll().filter(x => x.id !== e.id)); renderTracker(); toast("Deleted");
+    }
+  });
+  const print = $(`button[data-role="print"][data-id="${e.id}"]`, root);
+  if (print) print.addEventListener("click", () => printSaved(e));
+  const editr = $(`button[data-role="editrecipe"][data-id="${e.id}"]`, root);
+  if (editr) editr.addEventListener("click", () => openRecipeEditor(e.id));
+}
+
+/* ---------- recipe editor (change a tracked batch's recipe after the fact) ---------- */
+let editId = null;
+function openRecipeEditor(id) {
+  const e = loadAll().find(x => x.id === id);
+  if (!e) return;
+  editId = id;
+  $("#edName").value = e.name || "";
+  $("#edCureDays").value = e.cureDays || "";
+  const box = $("#edIngredients"); box.innerHTML = "";
+  (e.ingredients || []).forEach(ing => box.appendChild(edIngRow(ing)));
+  $("#edSteps").value = (e.steps || []).map(s => s.replace(/<\/?b>/g, "")).join("\n");
+  $("#editBack").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+function closeRecipeEditor() {
+  $("#editBack").classList.add("hidden");
+  document.body.style.overflow = "";
+  editId = null;
+}
+function edIngRow(ing = { label: "", grams: "", stage: "cure" }) {
+  const row = document.createElement("div");
+  row.className = "ed-ing";
+  const g = (ing.grams == null || ing.grams === "") ? "" : ing.grams;
+  const label = String(ing.label || "").replace(/"/g, "&quot;");
+  row.innerHTML =
+    `<input class="ed-ing-label" type="text" placeholder="Ingredient" value="${label}">
+     <input class="ed-ing-grams" type="number" inputmode="decimal" min="0" step="any" placeholder="g" value="${g}">
+     <select class="ed-ing-stage">
+       <option value="cure"${(ing.stage || "cure") === "cure" ? " selected" : ""}>Cure rub</option>
+       <option value="coat"${ing.stage === "coat" ? " selected" : ""}>Crust</option>
+     </select>
+     <button type="button" class="ed-ing-del" title="Remove">✕</button>`;
+  row.querySelector(".ed-ing-del").addEventListener("click", () => row.remove());
+  return row;
+}
+function saveRecipeEdits() {
+  const list = loadAll(); const e = list.find(x => x.id === editId);
+  if (!e) { closeRecipeEditor(); return; }
+  const name = $("#edName").value.trim();
+  if (name) e.name = name;
+  const cd = $("#edCureDays").value.trim();
+  if (cd) e.cureDays = cd;
+  e.ingredients = $$("#edIngredients .ed-ing").map(row => {
+    const label = row.querySelector(".ed-ing-label").value.trim();
+    if (!label) return null;
+    const grams = parseFloat(row.querySelector(".ed-ing-grams").value);
+    const stage = row.querySelector(".ed-ing-stage").value;
+    return { label, grams: isNaN(grams) ? 0 : +grams.toFixed(1), stage };
+  }).filter(Boolean);
+  const steps = $("#edSteps").value.split("\n").map(s => s.trim()).filter(Boolean);
+  if (steps.length) e.steps = steps;
+  saveAll(list); closeRecipeEditor(); renderTracker(); toast("Recipe updated ✓");
 }
 
 /* Drying rate over a recent window (default 14 days), in grams/day.
@@ -1299,7 +1523,9 @@ function cureCardHTML(e) {
       <textarea class="notes" id="notes-${e.id}" data-role="notes" data-id="${e.id}"
         placeholder="Observations — flipped the bag, extra salt on the thick end…">${notesVal}</textarea>
       <div class="btn-row" style="margin-top:12px">
+        <button class="btn sm ghost" data-role="editrecipe" data-id="${e.id}">✏️ Edit recipe</button>
         <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print recipe</button>
+        <button class="btn sm ghost" data-role="archive" data-id="${e.id}">🗄 Archive</button>
         <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
       </div>
     </details>
@@ -1358,6 +1584,10 @@ function dryCardHTML(e) {
     <div class="est-row">${estLine}</div>
     ${badges ? `<div class="badge-row">${badges}</div>` : ""}
 
+    ${done
+      ? `<div class="finish-panel"><div class="finish-lbl">🏁 Finished? Rate this batch</div>${ratingHTML(e)}</div>`
+      : (e.rating ? `<div class="finish-panel"><div class="finish-lbl">Your rating</div>${ratingHTML(e)}</div>` : "")}
+
     <div class="track-stats">
       <div class="s"><div class="v">${num(e.startWeight)}g</div><div class="k">Start</div></div>
       <div class="s"><div class="v">${num(cur)}g</div><div class="k">Current</div></div>
@@ -1387,7 +1617,9 @@ function dryCardHTML(e) {
       }).join("")}</ul>
       <div class="log-hint">Tap a date or weight to correct it.</div>
       <div class="btn-row" style="margin-top:12px">
+        <button class="btn sm ghost" data-role="editrecipe" data-id="${e.id}">✏️ Edit recipe</button>
         <button class="btn sm ghost" data-role="print" data-id="${e.id}">🖨 Print recipe</button>
+        <button class="btn sm ghost" data-role="archive" data-id="${e.id}">🗄 Archive</button>
         <button class="btn sm ghost" data-role="tocure" data-id="${e.id}">↩ Back to curing</button>
         <button class="btn sm ghost" data-role="del" data-id="${e.id}" style="color:var(--accent)">🗑 Delete</button>
       </div>
@@ -1458,6 +1690,12 @@ function wireCommon(e, root) {
   }
   const print = $(`button[data-role="print"][data-id="${e.id}"]`, root);
   if (print) print.addEventListener("click", () => printSaved(e));
+  // Edit the batch's recipe after the fact; archive it; rate it (both phases).
+  const editr = $(`button[data-role="editrecipe"][data-id="${e.id}"]`, root);
+  if (editr) editr.addEventListener("click", () => openRecipeEditor(e.id));
+  const arch = $(`button[data-role="archive"][data-id="${e.id}"]`, root);
+  if (arch) arch.addEventListener("click", () => archiveBatch(e.id));
+  wireRating(e, root);
   // Rename by clicking the name
   const nameEl = $(`.ename[data-id="${e.id}"]`, root);
   if (nameEl) {
@@ -2119,6 +2357,16 @@ $("#chBell").addEventListener("click", async () => {
 $("#chHist").addEventListener("toggle", () => { if ($("#chHist").open) renderChamberHistory(); });
 
 if (chamberCfg().url) connectChamber();
+// Recipe editor modal wiring
+$("#editClose").addEventListener("click", closeRecipeEditor);
+$("#edCancel").addEventListener("click", closeRecipeEditor);
+$("#edSave").addEventListener("click", saveRecipeEdits);
+$("#edAddIng").addEventListener("click", () => $("#edIngredients").appendChild(edIngRow()));
+$("#editBack").addEventListener("click", ev => { if (ev.target === $("#editBack")) closeRecipeEditor(); });
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && !$("#editBack").classList.contains("hidden")) closeRecipeEditor();
+});
+
 $("#exportBtn").addEventListener("click", exportData);
 $("#importBtn").addEventListener("click", () => $("#importFile").click());
 $("#importFile").addEventListener("change", e => {
