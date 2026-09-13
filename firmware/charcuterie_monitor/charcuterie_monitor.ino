@@ -1,8 +1,9 @@
 /*
  * Salume Studio - Curing Chamber Monitor (NodeMCU V3 / ESP8266 + DHT)
  *
- * Publishes retained temperature/humidity to an MQTT broker and announces
- * itself to Home Assistant via MQTT discovery. A retained "online" message
+ * Publishes retained temperature/humidity (plus a derived dew point and
+ * Wi-Fi-signal/uptime/IP diagnostics) to an MQTT broker and announces itself to
+ * Home Assistant via MQTT discovery. A retained "online" message
  * plus a Last-Will "offline" on charcuterie/monitor/status drive availability
  * in both Home Assistant and the Curing Chamber panel in charcuterie.html.
  *
@@ -36,6 +37,7 @@
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
+#include <math.h>   // logf() for the dew-point calculation
 
 // ============================ EDIT THESE =============================
 // Your Wi-Fi and broker details. Keep real credentials out of git - these
@@ -76,18 +78,43 @@ const uint16_t MQTT_BUFFER_SIZE = 1024;
 // fresh attempt.
 const uint8_t SENSOR_FAIL_THRESHOLD = 4;   // consecutive failed cycles before flagging offline
 
+// Spike rejection. A one-wire sensor on a long cable run occasionally returns a
+// frame that DECODES to a wrong number rather than to NaN, so it slips past the
+// isnan() guard and lands in Home Assistant as a sharp glitch. Two cheap gates
+// catch those: reject anything physically implausible outright, and reject a
+// value that jumps further in a single 15s cycle than the chamber ever really
+// could. The jump gate has a safety valve - after a few straight rejections we
+// accept the new value, so a genuine step change (a door left open, the sensor
+// relocated) isn't rejected forever.
+const float   TEMP_VALID_MIN = -40.0f;   // DHT22 sensing floor
+const float   TEMP_VALID_MAX =  80.0f;   // DHT22 sensing ceiling
+const float   HUM_VALID_MIN  =   0.0f;
+const float   HUM_VALID_MAX  = 100.0f;
+const float   TEMP_MAX_JUMP  =  10.0f;   // deg C plausibly attainable in one cycle
+const float   HUM_MAX_JUMP   =  25.0f;   // % RH plausibly attainable in one cycle
+const uint8_t SPIKE_OVERRIDE_AFTER = 4;  // accept a persistent new level after this many rejections
+
+// How often to refresh the diagnostic entities (Wi-Fi signal, uptime, IP). These
+// move slowly and don't need the sensor cadence, so publish them less often to
+// keep the broker quiet.
+const unsigned long DIAG_INTERVAL_MS = 60000;   // 1 minute
+
 #define DHTPIN  D4
-// DHT11 is what's wired in now. The DHT22/AM2302 is a drop-in upgrade - same
-// one-wire protocol and library, far better humidity accuracy and 0.1-degree
-// resolution. When it arrives, change DHT11 to DHT22 here and re-flash (add a
-// 4.7k-10k pull-up on the data line and keep the cable as short as you can for
-// a reliable read over the run).
-#define DHTTYPE DHT11
+// DHT22/AM2302 is what's wired in now - a big step up from the old DHT11 in
+// humidity accuracy and with 0.1-degree resolution. This build uses the common
+// 3-pin breakout module, which carries its own pull-up on the daughterboard, so
+// no external resistor is needed on the data line. Keep the cable as short as
+// you can for a reliable read over the run into the fridge.
+#define DHTTYPE DHT22
 
 // MQTT topics
 const char* TOPIC_STATUS      = "charcuterie/monitor/status";
 const char* TOPIC_TEMPERATURE = "charcuterie/monitor/temperature";
 const char* TOPIC_HUMIDITY    = "charcuterie/monitor/humidity";
+const char* TOPIC_DEWPOINT    = "charcuterie/monitor/dewpoint";
+const char* TOPIC_RSSI        = "charcuterie/monitor/rssi";
+const char* TOPIC_UPTIME      = "charcuterie/monitor/uptime";
+const char* TOPIC_IP          = "charcuterie/monitor/ip";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -128,67 +155,102 @@ void handleTelnet() {
   while (telnetClient && telnetClient.available()) telnetClient.read();
 }
 
+// Dew point from temperature (C) and relative humidity (%), via the
+// Magnus-Tetens approximation - accurate to a few hundredths of a degree across
+// the 0-60 C / 1-100% range a curing chamber lives in.
+float dewPointC(float tempC, float rh) {
+  const float a = 17.625f;
+  const float b = 243.04f;
+  float gamma = logf(rh / 100.0f) + (a * tempC) / (b + tempC);
+  return (b * gamma) / (a - gamma);
+}
+
+// The Home Assistant "device" block, identical for every entity, so all of them
+// group under one Charcuterie Monitor device in HA. Kept as a macro so the
+// discovery payloads below stay readable and can't drift out of sync.
+#define HA_DEVICE_BLOCK \
+  "\"device\":{\"identifiers\":[\"charcuterie_monitor\"]," \
+  "\"name\":\"Charcuterie Monitor\",\"manufacturer\":\"Zach\"," \
+  "\"model\":\"NodeMCU ESP8266\"}"
+
+// Build the config topic for an entity and publish its (retained) discovery
+// payload. Returns publish() success so announce() can flag a silent failure.
+// "force_update":true makes Home Assistant record a state (and history point) on
+// EVERY message, not just when the value changes - HA otherwise de-duplicates
+// identical consecutive values, so a run of unchanged readings makes the entity
+// look like it only refreshes every ~30s or slower. Only the measurement
+// entities pass forceUpdate=true; the slow diagnostics don't need it.
+bool publishDiscovery(const char* objectId, const char* payload) {
+  char topic[96];
+  snprintf(topic, sizeof(topic),
+           "homeassistant/sensor/charcuterie_monitor/%s/config", objectId);
+  return client.publish(topic, payload, true);
+}
+
 // Publish availability + the Home Assistant discovery configs (all retained).
 void announce() {
 
   client.publish(TOPIC_STATUS, "online", true);
 
-  const char* tempConfigTopic = "homeassistant/sensor/charcuterie_monitor/temperature/config";
-  const char* humConfigTopic  = "homeassistant/sensor/charcuterie_monitor/humidity/config";
+  bool ok = true;
 
-  const char* tempConfig = R"rawliteral(
-{
-  "name":"Charcuterie Temperature",
-  "unique_id":"charcuterie_temperature",
-  "state_topic":"charcuterie/monitor/temperature",
-  "availability_topic":"charcuterie/monitor/status",
-  "payload_available":"online",
-  "payload_not_available":"offline",
-  "unit_of_measurement":"°C",
-  "device_class":"temperature",
-  "state_class":"measurement",
-  "device":{
-    "identifiers":["charcuterie_monitor"],
-    "name":"Charcuterie Monitor",
-    "manufacturer":"Zach",
-    "model":"NodeMCU ESP8266"
-  }
-}
-)rawliteral";
+  ok &= publishDiscovery("temperature",
+    "{\"name\":\"Charcuterie Temperature\",\"unique_id\":\"charcuterie_temperature\","
+    "\"state_topic\":\"charcuterie/monitor/temperature\","
+    "\"availability_topic\":\"charcuterie/monitor/status\","
+    "\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+    "\"unit_of_measurement\":\"°C\",\"device_class\":\"temperature\","
+    "\"state_class\":\"measurement\",\"force_update\":true," HA_DEVICE_BLOCK "}");
 
-  const char* humConfig = R"rawliteral(
-{
-  "name":"Charcuterie Humidity",
-  "unique_id":"charcuterie_humidity",
-  "state_topic":"charcuterie/monitor/humidity",
-  "availability_topic":"charcuterie/monitor/status",
-  "payload_available":"online",
-  "payload_not_available":"offline",
-  "unit_of_measurement":"%",
-  "device_class":"humidity",
-  "state_class":"measurement",
-  "device":{
-    "identifiers":["charcuterie_monitor"],
-    "name":"Charcuterie Monitor",
-    "manufacturer":"Zach",
-    "model":"NodeMCU ESP8266"
-  }
-}
-)rawliteral";
+  ok &= publishDiscovery("humidity",
+    "{\"name\":\"Charcuterie Humidity\",\"unique_id\":\"charcuterie_humidity\","
+    "\"state_topic\":\"charcuterie/monitor/humidity\","
+    "\"availability_topic\":\"charcuterie/monitor/status\","
+    "\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+    "\"unit_of_measurement\":\"%\",\"device_class\":\"humidity\","
+    "\"state_class\":\"measurement\",\"force_update\":true," HA_DEVICE_BLOCK "}");
 
-  bool okTemp = client.publish(tempConfigTopic, tempConfig, true);
-  bool okHum  = client.publish(humConfigTopic, humConfig, true);
+  // Dew point (computed on-device). When chamber temp nears the dew point you're
+  // at condensation risk - the wet spots and soaked sensors that plague curing.
+  ok &= publishDiscovery("dewpoint",
+    "{\"name\":\"Charcuterie Dew Point\",\"unique_id\":\"charcuterie_dewpoint\","
+    "\"state_topic\":\"charcuterie/monitor/dewpoint\","
+    "\"availability_topic\":\"charcuterie/monitor/status\","
+    "\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+    "\"unit_of_measurement\":\"°C\",\"device_class\":\"temperature\","
+    "\"state_class\":\"measurement\",\"force_update\":true," HA_DEVICE_BLOCK "}");
 
-  if (okTemp && okHum) {
+  // Diagnostics - grouped under HA's Diagnostic section (entity_category), so
+  // you can tell a bad cable from weak Wi-Fi from a rebooting board at a glance.
+  ok &= publishDiscovery("rssi",
+    "{\"name\":\"Charcuterie Wi-Fi Signal\",\"unique_id\":\"charcuterie_rssi\","
+    "\"state_topic\":\"charcuterie/monitor/rssi\","
+    "\"availability_topic\":\"charcuterie/monitor/status\","
+    "\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+    "\"unit_of_measurement\":\"dBm\",\"device_class\":\"signal_strength\","
+    "\"state_class\":\"measurement\",\"entity_category\":\"diagnostic\"," HA_DEVICE_BLOCK "}");
+
+  ok &= publishDiscovery("uptime",
+    "{\"name\":\"Charcuterie Uptime\",\"unique_id\":\"charcuterie_uptime\","
+    "\"state_topic\":\"charcuterie/monitor/uptime\","
+    "\"availability_topic\":\"charcuterie/monitor/status\","
+    "\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+    "\"unit_of_measurement\":\"s\",\"device_class\":\"duration\","
+    "\"state_class\":\"total_increasing\",\"entity_category\":\"diagnostic\"," HA_DEVICE_BLOCK "}");
+
+  ok &= publishDiscovery("ip",
+    "{\"name\":\"Charcuterie IP Address\",\"unique_id\":\"charcuterie_ip\","
+    "\"state_topic\":\"charcuterie/monitor/ip\","
+    "\"availability_topic\":\"charcuterie/monitor/status\","
+    "\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+    "\"entity_category\":\"diagnostic\",\"icon\":\"mdi:ip-network\"," HA_DEVICE_BLOCK "}");
+
+  if (ok) {
     Log.println("Published Home Assistant discovery.");
   } else {
     // If this ever prints, either the packet buffer is too small for the payload
     // or the broker rejected the publish (e.g. an ACL that blocks homeassistant/#).
-    Log.print("Discovery publish FAILED (temp=");
-    Log.print(okTemp);
-    Log.print(", hum=");
-    Log.print(okHum);
-    Log.println("). Check MQTT_BUFFER_SIZE and broker permissions.");
+    Log.println("Discovery publish FAILED. Check MQTT_BUFFER_SIZE and broker permissions.");
   }
 }
 
@@ -374,6 +436,35 @@ void loop() {
       return;
     }
 
+    // Spike rejection. The frame decoded (not NaN) but may still be a glitch off
+    // the long cable run. Drop anything physically impossible outright, and drop
+    // a value that leapt further in one cycle than the chamber ever really could
+    // - unless we've rejected several in a row, in which case treat it as a real
+    // new level and let it through so we can't get stuck ignoring reality.
+    static float   lastGoodTemp = NAN;
+    static float   lastGoodHum  = NAN;
+    static uint8_t spikeStreak  = 0;
+
+    bool implausible = temperature < TEMP_VALID_MIN || temperature > TEMP_VALID_MAX ||
+                       humidity    < HUM_VALID_MIN  || humidity    > HUM_VALID_MAX;
+    bool jumped = !isnan(lastGoodTemp) &&
+                  (fabsf(temperature - lastGoodTemp) > TEMP_MAX_JUMP ||
+                   fabsf(humidity    - lastGoodHum)  > HUM_MAX_JUMP);
+
+    if ((implausible || jumped) && spikeStreak < SPIKE_OVERRIDE_AFTER) {
+      spikeStreak++;
+      Log.print("Rejected spike read (temp=");
+      Log.print(temperature);
+      Log.print(" C, hum=");
+      Log.print(humidity);
+      Log.print(" %) - ");
+      Log.println(implausible ? "out of range." : "jumped too far in one cycle.");
+      return;
+    }
+    spikeStreak = 0;
+    lastGoodTemp = temperature;
+    lastGoodHum  = humidity;
+
     // Good read: clear the streak, and if we'd flagged the sensor down, bring
     // availability back so the panels start trusting the readings again.
     if (sensorFlaggedOffline) {
@@ -383,6 +474,8 @@ void loop() {
     }
     sensorFailStreak = 0;
 
+    float dew = dewPointC(temperature, humidity);
+
     Log.print("Temperature: ");
     Log.print(temperature);
     Log.println(" C");
@@ -391,16 +484,41 @@ void loop() {
     Log.print(humidity);
     Log.println(" %");
 
+    Log.print("Dew point: ");
+    Log.print(dew);
+    Log.println(" C");
+
     char tempString[8];
     dtostrf(temperature, 1, 2, tempString);
 
     char humString[8];
     dtostrf(humidity, 1, 2, humString);
 
+    char dewString[8];
+    dtostrf(dew, 1, 2, dewString);
+
     client.publish(TOPIC_TEMPERATURE, tempString, true);
     client.publish(TOPIC_HUMIDITY, humString, true);
+    client.publish(TOPIC_DEWPOINT, dewString, true);
 
     Log.println("Published MQTT data.");
     Log.println();
+  }
+
+  // Diagnostics on their own slower cadence: Wi-Fi signal, uptime, and IP. All
+  // retained so HA shows the last value immediately on reconnect.
+  static unsigned long lastDiag = 0;
+  if (client.connected() && (millis() - lastDiag >= DIAG_INTERVAL_MS || lastDiag == 0)) {
+    lastDiag = millis();
+
+    char buf[24];
+
+    snprintf(buf, sizeof(buf), "%ld", (long)WiFi.RSSI());
+    client.publish(TOPIC_RSSI, buf, true);
+
+    snprintf(buf, sizeof(buf), "%lu", millis() / 1000UL);
+    client.publish(TOPIC_UPTIME, buf, true);
+
+    client.publish(TOPIC_IP, WiFi.localIP().toString().c_str(), true);
   }
 }
