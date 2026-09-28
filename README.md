@@ -65,6 +65,11 @@ time to update.
 ./install.sh
 ```
 
+If you run it from the unraid **User Scripts** plugin, paste in
+[`unraid-update.sh`](unraid-update.sh) instead: it's a tiny stub that downloads
+the latest `install.sh` from GitHub and runs it, so the script on the box never
+goes stale and there's nothing to rebuild by hand if it gets overwritten.
+
 Everything ships in one container and persists under one volume
 (`/mnt/user/appdata/salume-studio`), so there's nothing else to install — adjust
 `PORT`, `DATA`, or `BRANCH` at the top of the script if your box differs.

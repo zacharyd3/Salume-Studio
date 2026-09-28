@@ -43,6 +43,8 @@ docker run -d \
   -p "${PORT}:80" \
   -v "$DATA:/usr/share/nginx/html/data" \
   --restart unless-stopped \
+  --label net.unraid.docker.webui='http://[IP]:[PORT:80]/' \
+  --label net.unraid.docker.icon="https://raw.githubusercontent.com/$REPO/$BRANCH/icon.png" \
   "$IMAGE"
 
 echo "==> Done. Salume Studio is up on http://192.168.250.4:${PORT}/"
