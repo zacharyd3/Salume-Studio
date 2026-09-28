@@ -4,9 +4,16 @@ An offline-first charcuterie **curing calculator** and **drying tracker**, plus
 the makings of a live **curing-chamber monitor** fed by a cheap ESP8266 sensor.
 
 The app itself is a single self-contained file — [`charcuterie.html`](charcuterie.html) —
-with no build step and no runtime dependencies. You can double-click it to run
-it locally, or serve it from the NGINX container below so it's reachable from a
-phone or tablet by the fridge.
+with no build step and no runtime dependencies (its typefaces load from Google
+Fonts when online and fall back to system fonts otherwise). You can double-click
+it to run it locally, or serve it from the NGINX container below so it's
+reachable from a phone or tablet by the fridge.
+
+The interface is built mobile-first around three tabs — **Batches**, **Chamber**
+and **Calculator** (a bottom tab bar on phones, a top bar on desktop) — with
+light and dark themes (Auto / Light / Dark under **Settings**). Tap any batch to
+open its detail sheet: progress, drying curve, weigh-in log, notes, the full
+recipe and every action live there.
 
 It ships with a **library of 16 pre-built recipes** (grouped by pork / beef /
 game / lamb / poultry / salami), each with suggested ingredients and step-by-step
@@ -70,43 +77,43 @@ clears and is shared across every device that opens the app.
 
 - On load, the app fetches `data/curing.json` from the server (the shared
   source of truth) and shows it. It also **re-pulls** whenever you switch back
-  to the tab or into **My Curing**, so an edit made on another device shows up
+  to the tab or into **Batches**, so an edit made on another device shows up
   without a manual reload (it won't overwrite a local change that's still
   saving, or yank the field you're editing).
 - On every change it writes the file back via **nginx WebDAV** (a debounced
-  `PUT`). The little pill at the top of **My Curing** shows the sync state
-  (`Synced ✓`, `Saving…`, or `Local only` when opened as a bare file) — **tap
-  it to sync now**.
+  `PUT`). The pill in the top bar shows the sync state (`Synced`, `Saving…`,
+  `Offline`, or `Local only` when opened as a bare file) — **tap it to sync
+  now** (there's also a **Sync** button under **Settings → Data & sync**).
 
 A new batch starts in the **cure** stage: the card counts the days toward the
-recipe's cure length (editable) and flips to **✅ Ready to hang** when the window
+recipe's cure length (editable) and flips to **Ready** when the window
 is reached — which also pushes a notification through the same browser/Home
-Assistant channels as the chamber alerts. Tap **🌬️ Start drying**, weigh the
-piece, and it switches to weight tracking from that hang weight. (**↩ Back to
+Assistant channels as the chamber alerts. Tap **Start drying**, weigh the
+piece, and it switches to weight tracking from that hang weight. (**Back to
 curing** reverts if you jump the gun.)
 
-Any weigh-in can be corrected after the fact: in a batch's **Weigh-in history**,
-tap a **date** or a **weight** to edit it, or **✕** to delete it. Editing the
+Any weigh-in can be corrected after the fact: in a batch's **Weigh-ins** list,
+tap a **date** or a **weight** to edit it, or **×** to delete it. Editing the
 earliest weigh-in updates the batch's start weight (and re-derives its finish
 target); moving a weigh-in onto a day that already has one keeps a single entry
 per day. Edits sync like everything else.
 
-Plans change once a piece is hanging. **✏️ Edit recipe** (in a batch's
-**Notes · actions**) opens an editor where you can rename it, tweak the cure
+Plans change once a piece is hanging. **Edit recipe** (at the bottom of a
+batch's detail sheet) opens an editor where you can rename it, tweak the cure
 length, and change the ingredient list — adjust amounts, rename, remove, or add
 something you improvised (say a gochujang glaze that wasn't in the original),
 choosing whether each goes in the **cure rub** or the **exterior crust**. Steps
 are one-per-line. The edited recipe is what prints and syncs from then on.
 
-When a drying batch hits its target it shows **🏁 Finished? Rate this batch** —
+When a drying batch hits its target it shows **Finished? Rate this batch** —
 tap **1–5 stars** to record how the batch turned out (tap again to change,
 **clear** to reset). Ratings ride along with the batch's notes, so past batches
 become a searchable record of what worked.
 
-Finished with a batch? **🗄 Archive** tucks it into a collapsible **Archive**
-section at the bottom of **My Curing**, out of the active list (and out of the
-tab's count) but never deleted. Archived cards keep their rating, notes, print,
-and edit-recipe actions, and **↩ Restore** brings one back to the active list.
+Finished with a batch? **Archive** tucks it into a collapsible **Archive**
+section at the bottom of **Batches**, out of the active list (and out of the
+tab's count) but never deleted. Archived batches keep their rating, notes, print,
+and edit-recipe actions, and **Restore** brings one back to the active list.
 
 > Sync is last-writer-wins on the whole file, which is right for one person
 > moving between devices. If you keep the app open on two devices at once and
@@ -131,7 +138,7 @@ chmod 777 /mnt/user/appdata/salume-studio     # unraid appdata
 
 ### Export / Import
 
-**My Curing** has **Export** (download a JSON backup) and **Import** (load one
+**Settings → Data & sync** has **Export** (download a JSON backup) and **Import** (load one
 back, merged by entry). This is also how you migrate data from an old browser:
 export there, import here.
 
@@ -151,7 +158,7 @@ image — your `docker build` + `docker run` install script needs no changes). I
 does the two things a static page can't do on its own:
 
 - **Records history even with no browser open.** It subscribes to the chamber's
-  MQTT topics and writes samples to a SQLite database, so the **📈 Condition
+  MQTT topics and writes samples to a SQLite database, so the **Condition
   history** chart is populated the moment you open the app — you no longer have
   to leave a tab open for it to collect. The chart pulls from the server when the
   backend is reachable and falls back to per-browser samples otherwise (e.g. when
@@ -225,27 +232,28 @@ sketch — and make sure that user may publish under `homeassistant/#`, not just
 | `charcuterie/monitor/humidity`      | % RH                        |
 | `charcuterie/monitor/status`        | `online` / `offline` (LWT)  |
 
-The **Curing Chamber** panel at the top of the My Curing tab subscribes to these
-and shows live temp/humidity with target bands — green inside your target, amber
-just outside, red beyond. The ranges are **configurable** in the panel's settings
+The **Chamber** tab subscribes to these and shows live temp/humidity with target
+bands — green inside your target, amber just outside, red beyond (a compact
+readout also sits at the top of **Batches**). The ranges are **configurable**
+under **Settings → Target ranges**
 and default to **in-fridge drying** (1–5 °C / 70–85 % RH); bump them to ~11–15 °C
 for a dedicated curing chamber. If no fresh reading arrives for 3 minutes, or the
-sensor's `status` last-will reports `offline`, the tiles grey out and the panel
+sensor's `status` last-will reports `offline`, the tiles grey out and the tab
 says the sensor is offline instead of showing stale numbers as "Live". Because a
 browser can't open a raw MQTT/TCP socket (port 1883), it speaks **MQTT over
 WebSockets** — a tiny client is inlined in the page, no library needed.
 
-Tap the **🔔 bell** in the panel to opt into **alerts**: when temperature or
+Tap the **bell** on the Chamber tab to opt into **alerts**: when temperature or
 humidity leaves its target range (or the sensor drops offline) you get a browser
-notification and an in-panel banner, re-nudged every 30 minutes while the problem
+notification and an in-app banner, re-nudged every 30 minutes while the problem
 persists, and an all-clear when it recovers. Notifications need permission and a
 secure context (HTTPS or `localhost`); over plain-HTTP LAN the banner still shows.
 
-**Phone alerts, configured in the app.** In the chamber ⚙️ settings there's a
-**Home Assistant notify** section: tick *Send alerts via a Home Assistant notify
-service*, enter your **HA Base URL**, a **long-lived access token** (HA → Profile
-→ Security), and a **notify service** (hit **⟳ Load** to pull the list from HA, or
-type `notify` to hit every device), then **Test**. When the chamber goes out of
+**Phone alerts, configured in the app.** Under **Settings** there's a
+**Home Assistant alerts** section: switch on *Send alerts via a notify service*,
+enter your **Base URL**, a **long-lived access token** (HA → Profile → Security),
+and a **notify service** (hit **Load services** to pull the list from HA, or
+type `notify` to hit every device), then **Send test**. When the chamber goes out of
 range the app pushes to that service — no YAML to edit. Because the app has no
 backend, these fire **while the app is open** in a browser or installed PWA; for
 round-the-clock alerts, also use the Home Assistant package below.
@@ -254,10 +262,10 @@ round-the-clock alerts, also use the Home Assistant package below.
 > Two ways: add your app's origin to `http.cors_allowed_origins` in HA's config,
 > **or** — with no HA-side change — proxy HA through this server (uncomment the
 > `/ha/` block in [`nginx/default.conf`](nginx/default.conf) and set the app's
-> *HA Base URL* to `/ha`). The token is stored only in your browser's
+> *Base URL* to `/ha`). The token is stored only in your browser's
 > `localStorage`.
-Expand **📈 Condition history** to see temp and humidity plotted over the last few
-days with the target band shaded — handy for tracing a bad batch back to a
+The **Condition history** card on the Chamber tab plots temp and humidity over the
+last 6 hours, 24 hours or 3 days with the target band shaded — handy for tracing a bad batch back to a
 humidity swing. History is sampled every 5 minutes and kept in the browser
 (`localStorage`), separate from your synced curing data.
 
@@ -283,10 +291,10 @@ the broker — see the `location /mqtt` block in
 isn't at `192.168.250.3:9001`, then rebuild. Proxying this way also works when the
 broker sits on a VLAN the browser can't reach directly but the container can.
 
-In the app: **My Curing → 🌡️ Curing Chamber → ⚙️**, set the topics if they differ
+In the app: **Settings → Chamber sensor** (or **Set up sensor** on the Chamber tab), set the topics under **MQTT topics** if they differ
 from the defaults, leave MQTT user/password blank for an anonymous broker (the
 WebSocket URL defaults to the `/mqtt` proxy; use `ws://<broker>:9001` for a direct
-connection), and **Save & Connect**. Retained messages mean the last reading shows
+connection), and **Save & connect**. Retained messages mean the last reading shows
 up immediately. Settings persist in `localStorage`.
 
 ### Home Assistant
